@@ -1,0 +1,15 @@
+{
+  "devices": {
+    "general": [
+      "phone",
+      "tablet"
+    ]
+  },
+  "development": {
+    "addedSysCaps": [
+      "SystemCapability.ScreenTimeGuard.GuardService",
+      "SystemCapability.DistributedDataManager.Preferences.Core",
+      "SystemCapability.Security.CryptoFramework"
+    ]
+  }
+}

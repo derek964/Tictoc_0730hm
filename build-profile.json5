@@ -1,0 +1,55 @@
+{
+  "app": {
+    "products": [
+      {
+        "name": "default",
+        "signingConfig": "default",
+        "compatibleSdkVersion": "6.0.2(22)",
+        "runtimeOS": "HarmonyOS",
+        "targetSdkVersion": "6.0.2(22)",
+        "buildOption": {
+          "strictMode": {
+            "useNormalizedOHMUrl": true
+          }
+        }
+      }
+    ],
+    "buildModeSet": [
+      {
+        "name": "debug"
+      },
+      {
+        "name": "release"
+      }
+    ],
+    "signingConfigs": [
+      {
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "C:\\Users\\博亮\\.ohos\\config\\default_TictocBuild-20260911_aX9MiSXg1_IrAkYDk5wP64TYEKT_eMT5kvq_DINVBXA=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001BE374138FF0FA68EA9348568CAED60DA2992CB0FD4F85BA1067168BE355E61EFBC43E94CF6A3C3B",
+          "profile": "C:\\Users\\博亮\\.ohos\\config\\default_TictocBuild-20260911_aX9MiSXg1_IrAkYDk5wP64TYEKT_eMT5kvq_DINVBXA=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "C:\\Users\\博亮\\.ohos\\config\\default_TictocBuild-20260911_aX9MiSXg1_IrAkYDk5wP64TYEKT_eMT5kvq_DINVBXA=.p12",
+          "storePassword": "0000001B94DE0D05F195098FE75325982584C0CA645892A9D242BF3364226A52B1D2F41756EB10F0484D4C"
+        }
+      }
+    ]
+  },
+  "modules": [
+    {
+      "name": "entry",
+      "srcPath": "./entry",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
+    }
+  ]
+}
