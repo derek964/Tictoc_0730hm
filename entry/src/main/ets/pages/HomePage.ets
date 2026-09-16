@@ -46,10 +46,21 @@ struct HomePage {
   @State private busy: boolean = false;
   @State private currentTab: number = 0;
   @State private showAlwaysAllowed: boolean = false;
+  @State private pendingLimitTokens: string[] = [];
+  @State private pendingLimitToken: string = '';
+  @State private pendingLimitIndex: number = 0;
+  @State private pendingLimitTotal: number = 0;
   private tabController: TabsController = new TabsController();
 
   aboutToAppear(): void {
     this.initialize();
+  }
+
+  onPageShow(): void {
+    if (!this.loading && this.hasPin && this.isUnlocked) {
+      this.refreshRuntimeState(false);
+      this.refreshPermissions();
+    }
   }
 
   private async initialize(): Promise<void> {
@@ -196,9 +207,16 @@ struct HomePage {
           current.push(this.appLimits[index].token);
         }
         const tokens = await this.guard.pickApps(this.context, current);
+        const added: string[] = [];
+        for (let i = 0; i < tokens.length; i++) {
+          if (current.indexOf(tokens[i]) < 0) {
+            added.push(tokens[i]);
+          }
+        }
         this.appLimits = this.mergeLimits(this.appLimits, tokens);
         await this.settings.saveAppLimits(this.appLimits);
-        await this.syncRules('已更新管控应用');
+        await this.syncRules(added.length > 0 ? '已添加应用，请设置每天时长' : '已更新管控应用');
+        this.beginPendingLimits(added);
       } catch (error) {
         const err = error as BusinessError;
         this.toast(`应用选择未完成（错误码 ${err.code}）`);
@@ -228,7 +246,7 @@ struct HomePage {
     const next: AppLimitEntry[] = [];
     for (let index = 0; index < tokens.length; index++) {
       const token = tokens[index];
-      let minutes = 60;
+      let minutes = 0;
       for (let look = 0; look < current.length; look++) {
         if (current[look].token === token) {
           minutes = current[look].minutes;
@@ -238,6 +256,34 @@ struct HomePage {
       next.push({ token: token, minutes: minutes });
     }
     return next;
+  }
+
+  private beginPendingLimits(tokens: string[]): void {
+    this.pendingLimitTokens = tokens;
+    this.pendingLimitTotal = tokens.length;
+    if (tokens.length > 0) {
+      this.pendingLimitIndex = 1;
+      this.pendingLimitToken = tokens[0];
+    } else {
+      this.pendingLimitIndex = 0;
+      this.pendingLimitToken = '';
+    }
+  }
+
+  private closePendingLimit(token: string): void {
+    const remain: string[] = [];
+    for (let index = 0; index < this.pendingLimitTokens.length; index++) {
+      if (this.pendingLimitTokens[index] !== token) {
+        remain.push(this.pendingLimitTokens[index]);
+      }
+    }
+    this.pendingLimitTokens = remain;
+    if (remain.length > 0) {
+      this.pendingLimitIndex = this.pendingLimitIndex + 1;
+      this.pendingLimitToken = remain[0];
+    } else {
+      this.pendingLimitToken = '';
+    }
   }
 
   private async toggleDowntime(enabled: boolean): Promise<void> {
@@ -568,10 +614,14 @@ struct HomePage {
           busy: this.busy,
           onToggleDowntime: (enabled: boolean) => this.toggleDowntime(enabled),
           onSetDowntimeClock: (start: string, end: string) => this.setDowntimeClock(start, end),
+          pendingLimitToken: this.pendingLimitToken,
+          pendingLimitIndex: this.pendingLimitIndex,
+          pendingLimitTotal: this.pendingLimitTotal,
           onPickApps: () => this.pickManagedApps(),
           onOpenAlwaysAllowed: () => this.showAlwaysAllowed = true,
           onRemoveApp: (token: string) => this.removeManagedApp(token),
-          onSetLimit: (token: string, minutes: number) => this.setAppLimit(token, minutes)
+          onSetLimit: (token: string, minutes: number) => this.setAppLimit(token, minutes),
+          onPendingLimitClosed: (token: string) => this.closePendingLimit(token)
         })
       }
       .tabBar(this.tabBarItem('管控设置', 1))
@@ -589,6 +639,10 @@ struct HomePage {
           onRequestNotify: () => this.requestNotify(),
           onOpenBackground: () => this.openBackground(),
           onReleaseAll: () => this.releaseAll(),
+          onRefreshPermissions: () => {
+            this.refreshRuntimeState(false);
+            this.refreshPermissions();
+          },
           onPinChanged: (salt: string, hash: string) => this.saveNewPin(salt, hash),
           onToast: (message: string) => this.toast(message)
         })

@@ -11,16 +11,21 @@ export struct ControlPage {
   @Prop whitelistCount: number = 0;
   @Prop authorized: boolean = false;
   @Prop busy: boolean = false;
+  @Prop @Watch('onPendingLimitToken') pendingLimitToken: string = '';
+  @Prop pendingLimitIndex: number = 0;
+  @Prop pendingLimitTotal: number = 0;
   onToggleDowntime: (enabled: boolean) => void = (_enabled: boolean) => {};
   onSetDowntimeClock: (start: string, end: string) => void = (_s: string, _e: string) => {};
   onPickApps: () => void = () => {};
   onOpenAlwaysAllowed: () => void = () => {};
   onRemoveApp: (token: string) => void = (_token: string) => {};
   onSetLimit: (token: string, minutes: number) => void = (_token: string, _minutes: number) => {};
+  onPendingLimitClosed: (token: string) => void = (_token: string) => {};
 
   @State private showStartPicker: boolean = false;
   @State private showEndPicker: boolean = false;
   @State private showDurationPicker: boolean = false;
+  @State private durationCommitted: boolean = false;
   @State private editingToken: string = '';
   @State private editingHours: number = 1;
   @State private editingMinutes: number = 0;
@@ -34,6 +39,12 @@ export struct ControlPage {
       values.push(TimeUtils.pad2(value));
     }
     return values;
+  }
+
+  onPendingLimitToken(): void {
+    if (this.pendingLimitToken.length > 0) {
+      this.openPendingDuration(this.pendingLimitToken);
+    }
   }
 
   private downtimeEnabled(): boolean {
@@ -71,7 +82,7 @@ export struct ControlPage {
           this.sectionLabel('应用限额 (App Limits)')
           Column() {
             if (this.appLimits.length === 0) {
-              Text('暂未添加管控应用')
+              Text('先在系统页搜索并勾选应用，回来后再设每天时长')
                 .fontSize(14)
                 .fontColor(ThemeColor.subtitle)
                 .width('100%')
@@ -82,10 +93,10 @@ export struct ControlPage {
                 Column() {
                   Row() {
                     Column({ space: 4 }) {
-                      Text(`管控应用 ${index + 1}`)
+                      Text(`第 ${index + 1} 个已选应用`)
                         .fontSize(16)
                         .fontColor(ThemeColor.title)
-                      Text('系统选择器返回的受管应用')
+                      Text(item.minutes > 0 ? '点击可修改每天时长' : '待设置每天时长')
                         .fontSize(12)
                         .fontColor(ThemeColor.subtitle)
                     }
@@ -93,7 +104,7 @@ export struct ControlPage {
                     .alignItems(HorizontalAlign.Start)
                     .onClick(() => this.openDuration(item))
 
-                    Text(`${item.minutes}分钟`)
+                    Text(item.minutes > 0 ? `${item.minutes}分钟` : '未设时长')
                       .fontSize(14)
                       .fontWeight(FontWeight.Bold)
                       .fontColor(ThemeColor.primary)
@@ -117,7 +128,7 @@ export struct ControlPage {
               Text('+')
                 .fontSize(20)
                 .fontColor(ThemeColor.primary)
-              Text('添加管控应用')
+              Text('搜索并选择应用')
                 .fontSize(16)
                 .fontWeight(FontWeight.Bold)
                 .fontColor(ThemeColor.primary)
@@ -134,7 +145,7 @@ export struct ControlPage {
           .backgroundColor(ThemeColor.card)
           .borderRadius(16)
 
-          Text('鸿蒙无法像安卓一样列出应用名称和图标，添加与始终允许都使用系统应用选择器，功能与安卓页签一致。')
+          Text('搜索和勾选只能在系统选择页完成，那里有应用名称、图标和搜索。回来后会立刻让你为新选的应用设置每天时长。本页列表只用来改时长或删除，无法显示具体应用名。再点「搜索并选择应用」可在系统页看到已勾选项。')
             .fontSize(12)
             .fontColor(ThemeColor.subtitle)
             .margin({ bottom: 24 })
@@ -151,7 +162,17 @@ export struct ControlPage {
     .backgroundColor(ThemeColor.pageBg)
     .bindSheet($$this.showStartPicker, this.startClockSheet(), { height: 360, dragBar: true, showClose: true })
     .bindSheet($$this.showEndPicker, this.endClockSheet(), { height: 360, dragBar: true, showClose: true })
-    .bindSheet($$this.showDurationPicker, this.durationSheet(), { height: 380, dragBar: true, showClose: true })
+    .bindSheet($$this.showDurationPicker, this.durationSheet(), {
+      height: 380,
+      dragBar: true,
+      showClose: true,
+      onDisappear: () => {
+        if (!this.durationCommitted && this.pendingLimitToken.length > 0 &&
+          this.editingToken === this.pendingLimitToken) {
+          this.onPendingLimitClosed(this.editingToken);
+        }
+      }
+    })
   }
 
   @Builder
@@ -238,7 +259,11 @@ export struct ControlPage {
   @Builder
   private durationSheet() {
     Column({ space: 16 }) {
-      Text('设置使用时限')
+      Text(this.pendingLimitToken.length > 0 ?
+        (this.pendingLimitTotal > 1 ?
+          `为刚选的应用设置每天时长（${this.pendingLimitIndex}/${this.pendingLimitTotal}）` :
+          '为刚选的应用设置每天时长') :
+        '设置每天可用时长')
         .fontSize(18)
         .fontWeight(FontWeight.Bold)
       Row({ space: 24 }) {
@@ -269,9 +294,12 @@ export struct ControlPage {
         .onClick(() => {
           const minutes = this.editingHours * 60 + this.editingMinutes;
           if (minutes > 0 && this.editingToken.length > 0) {
+            this.durationCommitted = true;
             this.onSetLimit(this.editingToken, minutes);
+            const closedToken = this.editingToken;
+            this.showDurationPicker = false;
+            this.onPendingLimitClosed(closedToken);
           }
-          this.showDurationPicker = false;
         })
     }
     .padding(24)
@@ -295,9 +323,18 @@ export struct ControlPage {
   }
 
   private openDuration(item: AppLimitEntry): void {
+    this.durationCommitted = false;
     this.editingToken = item.token;
-    this.editingHours = Math.floor(item.minutes / 60);
-    this.editingMinutes = item.minutes % 60;
+    this.editingHours = item.minutes > 0 ? Math.floor(item.minutes / 60) : 1;
+    this.editingMinutes = item.minutes > 0 ? item.minutes % 60 : 0;
+    this.showDurationPicker = true;
+  }
+
+  private openPendingDuration(token: string): void {
+    this.durationCommitted = false;
+    this.editingToken = token;
+    this.editingHours = 1;
+    this.editingMinutes = 0;
     this.showDurationPicker = true;
   }
 }

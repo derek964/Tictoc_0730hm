@@ -15,6 +15,7 @@ export struct ProfilePage {
   onRequestNotify: () => void = () => {};
   onOpenBackground: () => void = () => {};
   onReleaseAll: () => void = () => {};
+  onRefreshPermissions: () => void = () => {};
   onPinChanged: (salt: string, hash: string) => void = (_salt: string, _hash: string) => {};
   onToast: (message: string) => void = (_message: string) => {};
 
@@ -22,6 +23,10 @@ export struct ProfilePage {
   @State private oldPin: string = '';
   @State private newPin: string = '';
   @State private confirmPin: string = '';
+
+  aboutToAppear(): void {
+    this.onRefreshPermissions();
+  }
 
   private snapshot(): PermissionSnapshot {
     return {
@@ -64,15 +69,22 @@ export struct ProfilePage {
 
           this.sectionHeader('核心权限管理')
           Column() {
-            this.permissionItem('使用情况访问权限', this.authorized,
-              '获取应用使用时长（鸿蒙由屏幕时间守护提供）', false, () => this.onRequestAuth())
-            this.permissionItem('系统守护执行', this.authorized,
-              '对应安卓无障碍服务，由系统拦截受管应用', false, () => this.onRequestAuth())
-            this.permissionItem('系统拦截页', this.authorized,
-              '对应安卓悬浮窗；鸿蒙使用系统限制页，无需叠层窗口', false, () => this.onRequestAuth())
-            this.permissionItem('读取应用列表', this.authorized,
-              this.managedCount > 0 ? `已选择 ${this.managedCount} 个受管应用` : '通过系统应用选择器识别应用',
-              true, () => this.onSelectApps())
+            this.permissionItem(
+              '屏幕时间守护授权',
+              this.authorized,
+              '对应安卓：使用情况 + 无障碍 + 悬浮窗。授权后由系统执行拦截。',
+              false,
+              () => this.onRequestAuth()
+            )
+            this.permissionItem(
+              '已选择管控应用',
+              this.managedCount > 0,
+              this.managedCount > 0 ?
+                ('已选择 ' + this.managedCount.toString() + ' 个受管应用') :
+                '对应安卓读取应用列表。鸿蒙通过系统选择器添加。',
+              true,
+              () => this.onSelectApps()
+            )
           }
           .backgroundColor(ThemeColor.card)
           .borderRadius(16)
@@ -80,12 +92,20 @@ export struct ProfilePage {
 
           this.sectionHeader('增强功能与守护')
           Column() {
-            this.permissionItem('保持后台运行', this.backgroundGranted,
-              '对应安卓忽略电池优化，减少被系统挂起', false, () => this.onOpenBackground())
-            this.permissionItem('允许发送通知', this.notifyEnabled,
-              '及时接收重要提醒', false, () => this.onRequestNotify())
-            this.permissionItem('防卸载守护', this.authorized,
-              '对应安卓设备管理器；授权后由系统管控策略约束卸载', true, () => this.onRequestAuth())
+            this.permissionItem(
+              '保持后台运行',
+              this.backgroundGranted,
+              '对应安卓忽略电池优化，减少被系统挂起',
+              false,
+              () => this.onOpenBackground()
+            )
+            this.permissionItem(
+              '允许发送通知',
+              this.notifyEnabled,
+              '及时接收重要提醒',
+              true,
+              () => this.onRequestNotify()
+            )
           }
           .backgroundColor(ThemeColor.card)
           .borderRadius(16)
@@ -99,7 +119,7 @@ export struct ProfilePage {
           .borderRadius(16)
           .margin({ left: 16, right: 16 })
 
-          Text('核心权限与安卓一一对应：使用情况、无障碍、悬浮窗在鸿蒙合并为屏幕时间守护授权；应用列表走系统选择器。')
+          Text('顶部守护状态只汇总核心两项：屏幕时间守护授权、已选择管控应用。从系统设置返回后会自动刷新。防卸载在当前 HarmonyOS API 22 没有对等开关，故不展示假状态。')
             .fontSize(12)
             .fontColor(ThemeColor.subtitle)
             .margin({ left: 20, right: 20, top: 8, bottom: 28 })
@@ -141,8 +161,8 @@ export struct ProfilePage {
           .fontWeight(FontWeight.Bold)
           .fontColor(this.coreGranted() ? ThemeColor.primary : ThemeColor.danger)
         Text(this.coreGranted() ?
-          '所有核心权限已开启，Tictoc 正在持续守护中' :
-          '部分核心权限未开启，管控可能失效，请及时处理')
+          '核心权限已开启，Tictoc 可持续下发系统管控规则' :
+          '核心权限未齐，请先完成守护授权并选择管控应用')
           .fontSize(12)
           .fontColor(ThemeColor.subtitle)
       }
