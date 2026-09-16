@@ -1,12 +1,20 @@
 {
   "string": [
     {
+      "name": "app_name",
+      "value": "Tictoc"
+    },
+    {
       "name": "app_desc",
       "value": "Tictoc 屏幕时间管理"
     },
     {
       "name": "screen_time_permission_reason",
       "value": "用于由系统执行用户设置的应用访问限制和屏幕使用时长规则"
+    },
+    {
+      "name": "background_permission_reason",
+      "value": "用于在后台保持屏幕时间守护，避免管控在息屏或切出后失效"
     },
     {
       "name": "parent_control_demo",

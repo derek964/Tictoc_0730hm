@@ -9,7 +9,9 @@
     "addedSysCaps": [
       "SystemCapability.ScreenTimeGuard.GuardService",
       "SystemCapability.DistributedDataManager.Preferences.Core",
-      "SystemCapability.Security.CryptoFramework"
+      "SystemCapability.Security.CryptoFramework",
+      "SystemCapability.Notification.Notification",
+      "SystemCapability.Security.AccessToken"
     ]
   }
 }

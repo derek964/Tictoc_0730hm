@@ -13,6 +13,10 @@
       "value": "Used by the system to apply app access and screen-time rules configured by the user"
     },
     {
+      "name": "background_permission_reason",
+      "value": "Keeps Tictoc screen-time rules active in the background"
+    },
+    {
       "name": "parent_control_demo",
       "value": "Parent Control Demo"
     },

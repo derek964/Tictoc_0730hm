@@ -2,6 +2,8 @@ import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { appPicker, guardService } from '@kit.ScreenTimeGuardKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { AppLimitEntry } from '../data/SettingsStore';
+import { TimeUtils } from '../util/TimeUtils';
 
 export interface GuardActionResult {
   success: boolean;
@@ -20,6 +22,7 @@ export class TictocGuardManager {
   private static readonly STRATEGY_PREFIX: string = 'tictoc_';
   private static readonly DOWNTIME_STRATEGY: string = 'tictoc_downtime';
   private static readonly DAILY_QUOTA_STRATEGY: string = 'tictoc_daily_quota';
+  private static readonly LIMIT_PREFIX: string = 'tictoc_limit_';
 
   public async queryState(): Promise<GuardRuntimeState> {
     let authorized = false;
@@ -33,8 +36,11 @@ export class TictocGuardManager {
       }
     } catch (error) {
       this.logError('queryState', error as BusinessError);
-      return { authorized: false, configuredStrategies: -1,
-        errorMessage: this.toFailure('系统状态查询失败', error as BusinessError).message };
+      return {
+        authorized: false,
+        configuredStrategies: -1,
+        errorMessage: this.toFailure('系统状态查询失败', error as BusinessError).message
+      };
     }
     return { authorized: authorized, configuredStrategies: configuredStrategies, errorMessage: '' };
   }
@@ -59,41 +65,49 @@ export class TictocGuardManager {
     return await appPicker.startAppPicker(context, { appTokens: currentTokens });
   }
 
-  public async applyImmediateRestriction(previousTokens: string[], tokens: string[]): Promise<GuardActionResult> {
-    if (tokens.length === 0) {
-      return { success: false, message: '请先选择要管控的应用' };
-    }
-    try {
-      if (previousTokens.length > 0) {
-        await guardService.releaseAppsRestriction(
-          { appTokens: previousTokens },
-          guardService.RestrictionType.BLOCKLIST_TYPE
-        );
+  public restrictedTokens(managed: AppLimitEntry[], whitelist: string[]): string[] {
+    const result: string[] = [];
+    for (let index = 0; index < managed.length; index++) {
+      const token = managed[index].token;
+      if (whitelist.indexOf(token) < 0 && result.indexOf(token) < 0) {
+        result.push(token);
       }
-      await guardService.setAppsRestriction(
-        { appTokens: tokens },
-        guardService.RestrictionType.BLOCKLIST_TYPE
-      );
-      return { success: true, message: '已立即限制所选应用' };
-    } catch (error) {
-      return this.toFailure('立即限制失败', error as BusinessError);
     }
+    return result;
   }
 
-  public async applyDowntime(tokens: string[], startTime: string,
-    endTime: string): Promise<GuardActionResult> {
-    if (tokens.length === 0) {
-      return { success: false, message: '请先选择要管控的应用' };
+  public async syncControlRules(managed: AppLimitEntry[], whitelist: string[],
+    downtime: string): Promise<GuardActionResult> {
+    const tokens = this.restrictedTokens(managed, whitelist);
+    const downtimeResult = await this.syncDowntime(tokens, downtime);
+    if (!downtimeResult.success) {
+      return downtimeResult;
     }
-    if (!this.isValidTime(startTime) || !this.isValidTime(endTime) || startTime === endTime) {
+    const limitResult = await this.syncAppLimits(managed, whitelist);
+    if (!limitResult.success) {
+      return limitResult;
+    }
+    return { success: true, message: '管控设置已同步到系统' };
+  }
+
+  public async syncDowntime(tokens: string[], downtime: string): Promise<GuardActionResult> {
+    if (downtime.length === 0) {
+      return await this.removeNamedStrategy(TictocGuardManager.DOWNTIME_STRATEGY, '已关闭停用时间');
+    }
+    const parts = downtime.split('-');
+    if (parts.length !== 2 || !TimeUtils.isValidClock(parts[0]) || !TimeUtils.isValidClock(parts[1]) ||
+      parts[0] === parts[1]) {
       return { success: false, message: '请输入有效且不同的开始、结束时间，例如 22:00 和 07:00' };
+    }
+    if (tokens.length === 0) {
+      return { success: false, message: '请先添加管控应用后再开启停用时间' };
     }
     const strategy: guardService.GuardStrategy = {
       name: TictocGuardManager.DOWNTIME_STRATEGY,
       timeStrategy: {
         type: guardService.TimeStrategyType.START_END_TIME_TYPE,
-        startTime: startTime,
-        endTime: endTime,
+        startTime: parts[0],
+        endTime: parts[1],
         repeat: [1, 2, 3, 4, 5, 6, 7]
       },
       appInfo: { appTokens: tokens },
@@ -102,34 +116,55 @@ export class TictocGuardManager {
     return await this.replaceAndStart(strategy, '每日停用时间已启用');
   }
 
-  public async applyDailyQuota(tokens: string[], minutes: number): Promise<GuardActionResult> {
-    if (tokens.length === 0) {
-      return { success: false, message: '请先选择要管控的应用' };
+  public async syncAppLimits(managed: AppLimitEntry[], whitelist: string[]): Promise<GuardActionResult> {
+    const keepNames: string[] = [];
+    for (let index = 0; index < managed.length; index++) {
+      const item = managed[index];
+      if (whitelist.indexOf(item.token) >= 0 || item.minutes < 1 || item.minutes > 1440) {
+        continue;
+      }
+      const name = this.limitStrategyName(item.token);
+      keepNames.push(name);
+      const strategy: guardService.GuardStrategy = {
+        name: name,
+        timeStrategy: {
+          type: guardService.TimeStrategyType.INCLUSIVE_DURATION_TYPE,
+          totalDuration: item.minutes,
+          repeat: [1, 2, 3, 4, 5, 6, 7]
+        },
+        appInfo: { appTokens: [item.token] },
+        appRestrictionType: guardService.RestrictionType.TRUSTLIST_TYPE
+      };
+      const result = await this.replaceAndStart(strategy, '应用限额已更新');
+      if (!result.success) {
+        return result;
+      }
     }
-    if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) {
-      return { success: false, message: '每日额度必须是 1 到 1440 分钟的整数' };
-    }
-    const strategy: guardService.GuardStrategy = {
-      name: TictocGuardManager.DAILY_QUOTA_STRATEGY,
-      timeStrategy: {
-        type: guardService.TimeStrategyType.INCLUSIVE_DURATION_TYPE,
-        totalDuration: minutes,
-        repeat: [1, 2, 3, 4, 5, 6, 7]
-      },
-      appInfo: { appTokens: tokens },
-      // Screen Time Guard Kit requires TRUSTLIST_TYPE for shared-duration strategies.
-      appRestrictionType: guardService.RestrictionType.TRUSTLIST_TYPE
-    };
-    return await this.replaceAndStart(strategy, `每日共享额度 ${minutes} 分钟已启用`);
+    return await this.removeOrphanLimitStrategies(keepNames);
   }
 
-  public async releaseAll(tokens: string[]): Promise<GuardActionResult> {
+  public async releaseImmediate(tokens: string[]): Promise<GuardActionResult> {
+    if (tokens.length === 0) {
+      return { success: true, message: '没有立即限制需要解除' };
+    }
+    try {
+      await guardService.releaseAppsRestriction(
+        { appTokens: tokens },
+        guardService.RestrictionType.BLOCKLIST_TYPE
+      );
+      return { success: true, message: '已解除立即限制' };
+    } catch (error) {
+      return this.toFailure('立即限制解除失败', error as BusinessError);
+    }
+  }
+
+  public async releaseAll(immediateTokens: string[]): Promise<GuardActionResult> {
     let changed = false;
     let directReleaseError: BusinessError | undefined = undefined;
-    if (tokens.length > 0) {
+    if (immediateTokens.length > 0) {
       try {
         await guardService.releaseAppsRestriction(
-          { appTokens: tokens },
+          { appTokens: immediateTokens },
           guardService.RestrictionType.BLOCKLIST_TYPE
         );
         changed = true;
@@ -138,7 +173,6 @@ export class TictocGuardManager {
         this.logError('releaseAppsRestriction', directReleaseError);
       }
     }
-
     try {
       const strategies = await guardService.queryGuardStrategies();
       for (const strategy of strategies) {
@@ -153,8 +187,12 @@ export class TictocGuardManager {
         await guardService.removeGuardStrategy(strategy.name);
         changed = true;
       }
+      const quotaCleanup = await this.removeNamedStrategy(TictocGuardManager.DAILY_QUOTA_STRATEGY, '');
       if (directReleaseError !== undefined) {
         return this.toFailure('定时策略已处理，但立即限制解除失败', directReleaseError);
+      }
+      if (!quotaCleanup.success && quotaCleanup.message.indexOf('1019000005') < 0) {
+        return quotaCleanup;
       }
       return {
         success: true,
@@ -163,6 +201,62 @@ export class TictocGuardManager {
     } catch (error) {
       return this.toFailure('解除限制失败', error as BusinessError);
     }
+  }
+
+  private async removeOrphanLimitStrategies(keepNames: string[]): Promise<GuardActionResult> {
+    try {
+      const strategies = await guardService.queryGuardStrategies();
+      for (const strategy of strategies) {
+        if (!strategy.name.startsWith(TictocGuardManager.LIMIT_PREFIX) &&
+          strategy.name !== TictocGuardManager.DAILY_QUOTA_STRATEGY) {
+          continue;
+        }
+        if (keepNames.indexOf(strategy.name) >= 0) {
+          continue;
+        }
+        try {
+          await guardService.stopGuardStrategy(strategy.name);
+        } catch (error) {
+          this.logError(`stopGuardStrategy:${strategy.name}`, error as BusinessError);
+        }
+        await guardService.removeGuardStrategy(strategy.name);
+      }
+      return { success: true, message: '应用限额已更新' };
+    } catch (error) {
+      return this.toFailure('清理旧限额失败', error as BusinessError);
+    }
+  }
+
+  private async removeNamedStrategy(name: string, successMessage: string): Promise<GuardActionResult> {
+    try {
+      const strategies = await guardService.queryGuardStrategies();
+      const existing = strategies.find((item: guardService.GuardStrategy) => item.name === name);
+      if (existing === undefined) {
+        return { success: true, message: successMessage.length > 0 ? successMessage : '规则不存在' };
+      }
+      try {
+        await guardService.stopGuardStrategy(name);
+      } catch (error) {
+        const stopError = error as BusinessError;
+        if (stopError.code !== 1019000008) {
+          return this.toFailure('停止原规则失败', stopError);
+        }
+      }
+      await guardService.removeGuardStrategy(name);
+      return { success: true, message: successMessage.length > 0 ? successMessage : '已删除规则' };
+    } catch (error) {
+      return this.toFailure('删除规则失败', error as BusinessError);
+    }
+  }
+
+  private limitStrategyName(token: string): string {
+    let hash = 2166136261;
+    for (let index = 0; index < token.length; index++) {
+      hash ^= token.charCodeAt(index);
+      hash = (hash * 16777619) | 0;
+    }
+    const unsigned = hash >>> 0;
+    return `${TictocGuardManager.LIMIT_PREFIX}${unsigned.toString(16)}${token.length.toString(16)}`;
   }
 
   private async replaceAndStart(strategy: guardService.GuardStrategy,
@@ -190,16 +284,6 @@ export class TictocGuardManager {
     }
   }
 
-  private isValidTime(value: string): boolean {
-    const matched = /^(\d{2}):(\d{2})$/.exec(value);
-    if (matched === null) {
-      return false;
-    }
-    const hour = Number(matched[1]);
-    const minute = Number(matched[2]);
-    return hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59;
-  }
-
   private toFailure(prefix: string, error: BusinessError): GuardActionResult {
     this.logError(prefix, error);
     switch (error.code) {
@@ -208,7 +292,10 @@ export class TictocGuardManager {
       case 801:
         return { success: false, message: `${prefix}：当前系统版本不支持此能力` };
       case 1019000001:
-        return { success: false, message: `${prefix}：系统内部错误（1019000001），需结合设备日志排查，不能仅据此判定为签名问题` };
+        return {
+          success: false,
+          message: `${prefix}：系统内部错误（1019000001），需结合设备日志排查`
+        };
       case 1019000002:
         return { success: false, message: `${prefix}：用户尚未授权` };
       case 1019000003:

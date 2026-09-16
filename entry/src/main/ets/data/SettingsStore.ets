@@ -1,29 +1,36 @@
-/*
- * Tictoc local settings. App tokens are opaque values supplied by the system picker.
- * They are kept only on this device and are never resolved into package names.
- */
 import { common } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
+
+export interface AppLimitEntry {
+  token: string;
+  minutes: number;
+}
 
 export interface TictocSettingsSnapshot {
   appTokens: string[];
   immediateTokens: string[];
+  whitelistTokens: string[];
+  appLimits: AppLimitEntry[];
+  downtime: string;
   downtimeStart: string;
   downtimeEnd: string;
-  dailyMinutes: number;
   pinSalt: string;
   pinHash: string;
+  defaultPinHintShown: boolean;
 }
 
 export class SettingsStore {
   private static readonly STORE_NAME: string = 'tictoc_settings';
   private static readonly KEY_APP_TOKENS: string = 'app_tokens';
   private static readonly KEY_IMMEDIATE_TOKENS: string = 'immediate_tokens';
+  private static readonly KEY_WHITELIST_TOKENS: string = 'whitelist_tokens';
+  private static readonly KEY_APP_LIMITS: string = 'app_limits';
+  private static readonly KEY_DOWNTIME: string = 'downtime';
   private static readonly KEY_DOWNTIME_START: string = 'downtime_start';
   private static readonly KEY_DOWNTIME_END: string = 'downtime_end';
-  private static readonly KEY_DAILY_MINUTES: string = 'daily_minutes';
   private static readonly KEY_PIN_SALT: string = 'pin_salt';
   private static readonly KEY_PIN_HASH: string = 'pin_hash';
+  private static readonly KEY_DEFAULT_PIN_HINT: string = 'default_pin_hint_shown';
 
   private store?: preferences.Preferences;
 
@@ -40,28 +47,25 @@ export class SettingsStore {
 
   public async load(): Promise<TictocSettingsSnapshot> {
     const data = this.getStore();
-    const tokenJson = await data.get(SettingsStore.KEY_APP_TOKENS, '[]') as string;
-    const immediateTokenJson = await data.get(SettingsStore.KEY_IMMEDIATE_TOKENS, '[]') as string;
-    let appTokens: string[] = [];
-    let immediateTokens: string[] = [];
-    try {
-      appTokens = JSON.parse(tokenJson) as string[];
-    } catch (_) {
-      appTokens = [];
-    }
-    try {
-      immediateTokens = JSON.parse(immediateTokenJson) as string[];
-    } catch (_) {
-      immediateTokens = [];
-    }
+    const appTokens = await this.readStringArray(SettingsStore.KEY_APP_TOKENS);
+    const immediateTokens = await this.readStringArray(SettingsStore.KEY_IMMEDIATE_TOKENS);
+    const whitelistTokens = await this.readStringArray(SettingsStore.KEY_WHITELIST_TOKENS);
+    const appLimits = await this.readAppLimits(appTokens);
+    const start = await data.get(SettingsStore.KEY_DOWNTIME_START, '22:00') as string;
+    const end = await data.get(SettingsStore.KEY_DOWNTIME_END, '07:00') as string;
+    const rawDowntime = await data.get(SettingsStore.KEY_DOWNTIME, '') as string;
+    const downtime = rawDowntime.length > 0 ? rawDowntime : '';
     return {
       appTokens: appTokens,
       immediateTokens: immediateTokens,
-      downtimeStart: await data.get(SettingsStore.KEY_DOWNTIME_START, '22:00') as string,
-      downtimeEnd: await data.get(SettingsStore.KEY_DOWNTIME_END, '07:00') as string,
-      dailyMinutes: await data.get(SettingsStore.KEY_DAILY_MINUTES, 60) as number,
+      whitelistTokens: whitelistTokens,
+      appLimits: appLimits,
+      downtime: downtime,
+      downtimeStart: start,
+      downtimeEnd: end,
       pinSalt: await data.get(SettingsStore.KEY_PIN_SALT, '') as string,
-      pinHash: await data.get(SettingsStore.KEY_PIN_HASH, '') as string
+      pinHash: await data.get(SettingsStore.KEY_PIN_HASH, '') as string,
+      defaultPinHintShown: (await data.get(SettingsStore.KEY_DEFAULT_PIN_HINT, false) as boolean)
     };
   }
 
@@ -75,11 +79,26 @@ export class SettingsStore {
     await this.getStore().flush();
   }
 
-  public async saveRuleInputs(start: string, end: string, dailyMinutes: number): Promise<void> {
+  public async saveWhitelistTokens(tokens: string[]): Promise<void> {
+    await this.getStore().put(SettingsStore.KEY_WHITELIST_TOKENS, JSON.stringify(tokens));
+    await this.getStore().flush();
+  }
+
+  public async saveAppLimits(limits: AppLimitEntry[]): Promise<void> {
+    await this.getStore().put(SettingsStore.KEY_APP_LIMITS, JSON.stringify(limits));
+    const tokens: string[] = [];
+    for (let index = 0; index < limits.length; index++) {
+      tokens.push(limits[index].token);
+    }
+    await this.getStore().put(SettingsStore.KEY_APP_TOKENS, JSON.stringify(tokens));
+    await this.getStore().flush();
+  }
+
+  public async saveDowntime(downtime: string, start: string, end: string): Promise<void> {
     const data = this.getStore();
+    await data.put(SettingsStore.KEY_DOWNTIME, downtime);
     await data.put(SettingsStore.KEY_DOWNTIME_START, start);
     await data.put(SettingsStore.KEY_DOWNTIME_END, end);
-    await data.put(SettingsStore.KEY_DAILY_MINUTES, dailyMinutes);
     await data.flush();
   }
 
@@ -90,10 +109,60 @@ export class SettingsStore {
     await data.flush();
   }
 
+  public async markDefaultPinHintShown(): Promise<void> {
+    await this.getStore().put(SettingsStore.KEY_DEFAULT_PIN_HINT, true);
+    await this.getStore().flush();
+  }
+
   public async clearPin(): Promise<void> {
     const data = this.getStore();
     await data.delete(SettingsStore.KEY_PIN_SALT);
     await data.delete(SettingsStore.KEY_PIN_HASH);
     await data.flush();
+  }
+
+  private async readStringArray(key: string): Promise<string[]> {
+    const raw = await this.getStore().get(key, '[]') as string;
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+      const values: string[] = [];
+      for (let index = 0; index < parsed.length; index++) {
+        values.push(`${parsed[index]}`);
+      }
+      return values;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  private async readAppLimits(appTokens: string[]): Promise<AppLimitEntry[]> {
+    const raw = await this.getStore().get(SettingsStore.KEY_APP_LIMITS, '[]') as string;
+    let parsed: AppLimitEntry[] = [];
+    try {
+      const decoded = JSON.parse(raw);
+      parsed = Array.isArray(decoded) ? decoded as AppLimitEntry[] : [];
+    } catch (_) {
+      parsed = [];
+    }
+    const result: AppLimitEntry[] = [];
+    const seen: string[] = [];
+    for (let index = 0; index < parsed.length; index++) {
+      const item = parsed[index];
+      if (item !== undefined && item.token.length > 0 && item.minutes > 0 && seen.indexOf(item.token) < 0) {
+        seen.push(item.token);
+        result.push({ token: item.token, minutes: item.minutes });
+      }
+    }
+    for (let index = 0; index < appTokens.length; index++) {
+      const token = appTokens[index];
+      if (seen.indexOf(token) < 0) {
+        seen.push(token);
+        result.push({ token: token, minutes: 60 });
+      }
+    }
+    return result;
   }
 }
