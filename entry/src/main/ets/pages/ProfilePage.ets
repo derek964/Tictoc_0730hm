@@ -3,25 +3,15 @@ import { ThemeColor } from '../ui/Theme';
 
 /**
  * Permission row mirrors Android PermissionItem:
- * trailing and subtitle both come from the same granted flag.
- * granted is copied into @State so the Text nodes always rebuild when it flips.
+ * trailing and subtitle both bind to the same granted @Prop (no local copy).
  */
 @Component
 struct PermissionStatusRow {
   @Prop title: string = '';
-  @Prop @Watch('onGrantedChanged') granted: boolean = false;
+  @Prop granted: boolean = false;
   @Prop offSubtitle: string = '';
   @Prop isLast: boolean = true;
   onTap: () => void = () => {};
-  @State private isOn: boolean = false;
-
-  aboutToAppear(): void {
-    this.isOn = this.granted;
-  }
-
-  onGrantedChanged(): void {
-    this.isOn = this.granted;
-  }
 
   build() {
     Column() {
@@ -30,21 +20,20 @@ struct PermissionStatusRow {
           Text(this.title)
             .fontSize(16)
             .fontColor(ThemeColor.title)
-          Text(this.isOn ? '已开启' : this.offSubtitle)
+          Text(this.granted ? '已开启' : this.offSubtitle)
             .fontSize(12)
             .fontColor(ThemeColor.subtitle)
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
 
-        Text(this.isOn ? '已开启' : '去开启')
+        Text(this.granted ? '已开启' : '去开启')
           .fontSize(14)
-          .fontColor(this.isOn ? ThemeColor.subtitle : ThemeColor.danger)
-          .fontWeight(this.isOn ? FontWeight.Normal : FontWeight.Bold)
+          .fontColor(this.granted ? ThemeColor.subtitle : ThemeColor.danger)
+          .fontWeight(this.granted ? FontWeight.Normal : FontWeight.Bold)
       }
-      .padding({ left: 16, right: 16, top: 16, bottom: 16 })
       .width('100%')
-      .onClick(() => this.onTap())
+      .padding({ left: 16, right: 16, top: 14, bottom: 14 })
 
       if (!this.isLast) {
         Divider()
@@ -53,6 +42,9 @@ struct PermissionStatusRow {
       }
     }
     .width('100%')
+    .onClick(() => {
+      this.onTap();
+    })
   }
 }
 
@@ -67,7 +59,7 @@ export struct ProfilePage {
   onRequestAuth: () => Promise<void> = async () => {};
   onRequestNotify: () => Promise<void> = async () => {};
   onOpenBackground: () => Promise<void> = async () => {};
-  onReleaseAll: () => void = () => {};
+  onReleaseAll: () => Promise<void> = async () => {};
   onRefreshPermissions: () => Promise<void> = async () => {};
   onPinChanged: (salt: string, hash: string) => void = (_salt: string, _hash: string) => {};
   onToast: (message: string) => void = (_message: string) => {};
@@ -201,7 +193,7 @@ export struct ProfilePage {
 
           this.sectionHeader('紧急操作')
           Column() {
-            this.rowItem('解除全部限制', '需验证家长密码，清除本应用创建的全部管控规则', true, () => {
+            this.rowItem('解除全部限制', '需验证家长密码；清除全部管控规则，并关闭屏幕时间守护授权', true, () => {
               this.releasePin = '';
               this.openSheet('release');
             }, '>', true)
@@ -439,7 +431,7 @@ export struct ProfilePage {
     }
     this.closeSheet();
     this.releasePin = '';
-    this.onReleaseAll();
+    await this.onReleaseAll();
     await this.reloadPermissions();
   }
 }

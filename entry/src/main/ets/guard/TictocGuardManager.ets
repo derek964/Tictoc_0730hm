@@ -194,10 +194,20 @@ export class TictocGuardManager {
       if (!quotaCleanup.success && quotaCleanup.message.indexOf('1019000005') < 0) {
         return quotaCleanup;
       }
+      // Mirror Android-style full release: clear rules then revoke Screen Time Guard auth
+      // so Profile 守护状态 / 「已开启」 flip to 未开启 after refresh.
+      try {
+        await guardService.revokeUserAuth();
+        changed = true;
+      } catch (error) {
+        this.logError('revokeUserAuth', error as BusinessError);
+        return this.toFailure('管控规则已清理，但撤销屏幕时间守护授权失败', error as BusinessError);
+      }
       return {
         success: true,
-        message: changed ? '已解除 Tictoc 创建的全部限制' : '当前没有 Tictoc 管控规则'
+        message: '已解除全部限制，并关闭屏幕时间守护授权'
       };
+
     } catch (error) {
       return this.toFailure('解除限制失败', error as BusinessError);
     }

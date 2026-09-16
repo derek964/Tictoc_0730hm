@@ -612,7 +612,7 @@ struct HomePage {
           onRequestAuth: () => this.requestAuthorization(),
           onRequestNotify: () => this.requestNotify(),
           onOpenBackground: () => this.openBackground(),
-          onReleaseAll: () => this.releaseAll(),
+          onReleaseAll: async (): Promise<void> => await this.releaseAll(),
           onRefreshPermissions: async (): Promise<void> => await this.refreshProfilePermissions(),
           onPinChanged: (salt: string, hash: string) => this.saveNewPin(salt, hash),
           onToast: (message: string) => this.toast(message)
