@@ -251,13 +251,15 @@ struct HomePage {
     for (let index = 0; index < tokens.length; index++) {
       const token = tokens[index];
       let minutes = 0;
+      let label = '';
       for (let look = 0; look < current.length; look++) {
         if (current[look].token === token) {
           minutes = current[look].minutes;
+          label = current[look].label;
           break;
         }
       }
-      next.push({ token: token, minutes: minutes });
+      next.push({ token: token, minutes: minutes, label: label });
     }
     return next;
   }
@@ -304,7 +306,7 @@ struct HomePage {
     for (let index = 0; index < this.appLimits.length; index++) {
       const item = this.appLimits[index];
       if (item.token === token) {
-        next.push({ token: token, minutes: minutes });
+        next.push({ token: token, minutes: minutes, label: item.label });
       } else {
         next.push(item);
       }
@@ -312,6 +314,20 @@ struct HomePage {
     this.appLimits = next;
     await this.settings.saveAppLimits(next);
     await this.syncRules('已更新应用限额');
+  }
+
+  private async setAppLabel(token: string, label: string): Promise<void> {
+    const next: AppLimitEntry[] = [];
+    for (let index = 0; index < this.appLimits.length; index++) {
+      const item = this.appLimits[index];
+      if (item.token === token) {
+        next.push({ token: token, minutes: item.minutes, label: label });
+      } else {
+        next.push(item);
+      }
+    }
+    this.appLimits = next;
+    await this.settings.saveAppLimits(next);
   }
 
   private async syncRules(successToast: string): Promise<GuardActionResult> {
@@ -372,6 +388,13 @@ struct HomePage {
     } finally {
       this.busy = false;
     }
+  }
+
+  private async lockSettings(): Promise<void> {
+    await this.syncRules('管控规则已同步到系统');
+    this.isUnlocked = false;
+    this.pinInput = '';
+    this.toast('已进入管控。之后打开 Tictoc 或修改设置，都要验证家长密码。');
   }
 
   private async saveNewPin(salt: string, hash: string): Promise<void> {
@@ -597,7 +620,9 @@ struct HomePage {
           onPickApps: () => this.pickManagedApps(),
           onOpenAlwaysAllowed: () => this.showAlwaysAllowed = true,
           onRemoveApp: (token: string) => this.removeManagedApp(token),
-          onSetLimit: (token: string, minutes: number): Promise<void> => this.setAppLimit(token, minutes)
+          onSetLimit: (token: string, minutes: number): Promise<void> => this.setAppLimit(token, minutes),
+          onSetLabel: (token: string, label: string): Promise<void> => this.setAppLabel(token, label),
+          onEnterControl: async (): Promise<void> => await this.lockSettings()
         })
       }
       .tabBar(this.tabBarItem('管控设置', 1))

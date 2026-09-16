@@ -17,6 +17,8 @@ export struct ControlPage {
   onOpenAlwaysAllowed: () => void = () => {};
   onRemoveApp: (token: string) => void = (_token: string) => {};
   onSetLimit: (token: string, minutes: number) => Promise<void> = async (_token: string, _minutes: number): Promise<void> => {};
+  onSetLabel: (token: string, label: string) => Promise<void> = async (_token: string, _label: string): Promise<void> => {};
+  onEnterControl: () => Promise<void> = async () => {};
 
   @State private showSheet: boolean = false;
   @State private sheetKind: string = 'none';
@@ -24,6 +26,8 @@ export struct ControlPage {
   @State private editingToken: string = '';
   @State private editingHours: number = 1;
   @State private editingMinutes: number = 0;
+  @State private editingLabel: string = '';
+  @State private labelCommitted: boolean = false;
   @State private pickerDate: Date = new Date();
   @State private addSessionTokens: string[] = [];
   @State private addSessionIndex: number = 0;
@@ -56,6 +60,21 @@ export struct ControlPage {
         .fontColor(ThemeColor.title)
         .width('100%')
         .padding({ left: 16, right: 16, top: 12, bottom: 8 })
+
+      Button('进入管控')
+        .width('100%')
+        .height(48)
+        .fontSize(17)
+        .fontWeight(FontWeight.Bold)
+        .fontColor('#FFFFFF')
+        .backgroundColor(ThemeColor.primary)
+        .margin({ left: 16, right: 16, bottom: 4 })
+        .onClick(() => this.onEnterControl())
+      Text('规则已由系统执行。点击后锁定 Tictoc，修改需验证家长密码（对齐安卓打开应用先输 PIN）。')
+        .fontSize(12)
+        .fontColor(ThemeColor.subtitle)
+        .width('100%')
+        .padding({ left: 16, right: 16, bottom: 8 })
 
       Scroll() {
         Column({ space: 16 }) {
@@ -108,16 +127,16 @@ export struct ControlPage {
                 Column() {
                   Row() {
                     Column({ space: 4 }) {
-                      Text(`管控应用 ${index + 1}`)
+                      Text(item.label.length > 0 ? item.label : `管控应用 ${index + 1}`)
                         .fontSize(16)
                         .fontColor(ThemeColor.title)
-                      Text(item.minutes > 0 ? '点此可修改每天时长' : '尚未设置每天时长')
+                      Text(item.minutes > 0 ? `每天 ${item.minutes} 分钟 · 点名称改备注` : '尚未设置每天时长 · 点右侧设置')
                         .fontSize(12)
                         .fontColor(ThemeColor.subtitle)
                     }
                     .layoutWeight(1)
                     .alignItems(HorizontalAlign.Start)
-                    .onClick(() => this.openDuration(item, false))
+                    .onClick(() => this.openLabelEditor(item))
 
                     Text(item.minutes > 0 ? `${item.minutes}分钟` : '未设时长')
                       .fontSize(14)
@@ -136,7 +155,7 @@ export struct ControlPage {
                     Divider().color(ThemeColor.divider).margin({ left: 16 })
                   }
                 }
-              }, (item: AppLimitEntry) => `${item.token}#${item.minutes}`)
+              }, (item: AppLimitEntry) => `${item.token}#${item.minutes}#${item.label}`)
             }
 
             Divider().color(ThemeColor.divider)
@@ -185,7 +204,7 @@ export struct ControlPage {
     .height('100%')
     .backgroundColor(ThemeColor.pageBg)
     .bindSheet($$this.showSheet, this.sheetContent(), {
-      height: this.sheetKind === 'duration' ? 400 : 360,
+      height: this.sheetKind === 'duration' ? 400 : (this.sheetKind === 'label' ? 280 : 360),
       dragBar: true,
       showClose: true,
       onDisappear: () => {
@@ -241,6 +260,8 @@ export struct ControlPage {
       this.clockSheetContent('选择开始时间', true)
     } else if (this.sheetKind === 'end') {
       this.clockSheetContent('选择结束时间', false)
+    } else if (this.sheetKind === 'label') {
+      this.labelSheet()
     } else if (this.sheetKind === 'duration') {
       this.durationSheet()
     } else {
@@ -340,7 +361,7 @@ export struct ControlPage {
       this.addSessionTotal = added.length;
       this.addSessionIndex = 1;
       this.inAddSession = true;
-      this.openDurationForToken(added[0], true);
+      this.openLabelForToken(added[0], true);
     } catch (_) {
       this.clearAddSession();
     }
@@ -362,7 +383,7 @@ export struct ControlPage {
       return;
     }
     this.addSessionIndex = this.addSessionIndex + 1;
-    this.openDurationForToken(remain[0], true);
+    this.openLabelForToken(remain[0], true);
   }
 
   private clearAddSession(): void {
@@ -381,9 +402,93 @@ export struct ControlPage {
     const continueAdd = this.isAddSession();
     this.durationCommitted = true;
     await this.onSetLimit(token, minutes);
-    this.closeSheet();
     if (continueAdd) {
       this.advanceAddSession();
+    } else {
+      this.closeSheet();
+    }
+  }
+
+
+  @Builder
+  private labelSheet() {
+    Column({ space: 16 }) {
+      Text(this.isAddSession() && this.addSessionTotal > 1 ?
+        `给第 ${this.addSessionIndex} 个应用起个备注名` : '给这个应用起个备注名')
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+      Text('系统选择页不返回应用名。备注只存在本机，方便你分辨限额。例如：抖音、微信。')
+        .fontSize(12)
+        .fontColor(ThemeColor.subtitle)
+      TextInput({ text: this.editingLabel, placeholder: '例如：抖音' })
+        .maxLength(20)
+        .onChange((value: string) => {
+          this.editingLabel = value;
+        })
+      Button('保存备注')
+        .width('100%')
+        .enabled(this.editingLabel.trim().length > 0)
+        .onClick(() => {
+          this.confirmLabel();
+        })
+    }
+    .padding(24)
+    .width('100%')
+  }
+
+  private displayName(item: AppLimitEntry, index: number): string {
+    if (item.label.length > 0) {
+      return item.label;
+    }
+    return `管控应用 ${index + 1}`;
+  }
+
+  private openLabelEditor(item: AppLimitEntry): void {
+    this.inAddSession = false;
+    this.editingToken = item.token;
+    this.editingLabel = item.label;
+    this.labelCommitted = false;
+    this.openSheet('label');
+  }
+
+  private openLabelForToken(token: string, asAddStep: boolean): void {
+    this.labelCommitted = false;
+    this.editingToken = token;
+    this.editingLabel = '';
+    if (!asAddStep) {
+      for (let index = 0; index < this.appLimits.length; index++) {
+        if (this.appLimits[index].token === token) {
+          this.editingLabel = this.appLimits[index].label;
+          break;
+        }
+      }
+    }
+    this.openSheet('label');
+  }
+
+  private async confirmLabel(): Promise<void> {
+    const name = this.editingLabel.trim();
+    if (name.length === 0 || this.editingToken.length === 0) {
+      return;
+    }
+    const token = this.editingToken;
+    const continueAdd = this.isAddSession();
+    this.labelCommitted = true;
+    await this.onSetLabel(token, name);
+    if (continueAdd) {
+      this.openDurationForToken(token, true);
+    } else {
+      this.closeSheet();
+    }
+  }
+
+  private skipLabel(): void {
+    const token = this.editingToken;
+    this.labelCommitted = true;
+    if (this.isAddSession() && token.length > 0) {
+      this.openDurationForToken(token, true);
+    } else {
+      this.closeSheet();
     }
   }
 
@@ -436,12 +541,22 @@ export struct ControlPage {
   }
 
   private handleSheetDisappear(): void {
+    // If we immediately opened the next sheet, ignore this disappear.
+    if (this.showSheet) {
+      return;
+    }
     const kind = this.sheetKind;
-    const wasAdd = this.isAddSession() && kind === 'duration';
     const token = this.editingToken;
-    const committed = this.durationCommitted;
+    const durationCommitted = this.durationCommitted;
+    const labelCommitted = this.labelCommitted;
+    const wasAddDuration = this.isAddSession() && kind === 'duration';
+    const wasAddLabel = this.isAddSession() && kind === 'label';
     this.sheetKind = 'none';
-    if (wasAdd && !committed && token.length > 0) {
+    if (wasAddLabel && !labelCommitted && token.length > 0) {
+      this.openDurationForToken(token, true);
+      return;
+    }
+    if (wasAddDuration && !durationCommitted && token.length > 0) {
       this.advanceAddSession();
     }
   }

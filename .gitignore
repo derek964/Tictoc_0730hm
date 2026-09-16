@@ -9,3 +9,9 @@ local.properties
 *.p7b
 *.cer
 *.pem
+
+# local helper scripts (not part of the app)
+_*.py
+
+outputs/
+*.hap

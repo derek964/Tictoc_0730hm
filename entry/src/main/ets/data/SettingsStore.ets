@@ -4,6 +4,7 @@ import { preferences } from '@kit.ArkData';
 export interface AppLimitEntry {
   token: string;
   minutes: number;
+  label: string;
 }
 
 export interface TictocSettingsSnapshot {
@@ -152,16 +153,18 @@ export class SettingsStore {
     const seen: string[] = [];
     for (let index = 0; index < parsed.length; index++) {
       const item = parsed[index];
-      if (item !== undefined && item.token.length > 0 && item.minutes > 0 && seen.indexOf(item.token) < 0) {
+      if (item !== undefined && item.token.length > 0 && seen.indexOf(item.token) < 0) {
         seen.push(item.token);
-        result.push({ token: item.token, minutes: item.minutes });
+        const minutes = item.minutes > 0 ? item.minutes : 0;
+        const label = item.label !== undefined ? item.label : '';
+        result.push({ token: item.token, minutes: minutes, label: label });
       }
     }
     for (let index = 0; index < appTokens.length; index++) {
       const token = appTokens[index];
       if (seen.indexOf(token) < 0) {
         seen.push(token);
-        result.push({ token: token, minutes: 60 });
+        result.push({ token: token, minutes: 0, label: '' });
       }
     }
     return result;
