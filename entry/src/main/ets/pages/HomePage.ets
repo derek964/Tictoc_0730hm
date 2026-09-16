@@ -105,20 +105,26 @@ struct HomePage {
     this.getUIContext().getPromptAction().showToast({ message: message, duration: 2500 });
   }
 
-  private async unlockFromInput(value: string): Promise<void> {
+  private async unlockFromInput(value: string, force: boolean = false): Promise<void> {
     if (this.busy || this.isUnlocked) {
       return;
     }
     const seq = ++this.unlockSeq;
     const now = Date.now();
     if (now < this.lockUntil) {
-      if (value.length === 6) {
+      if (force || value.length >= 4) {
         const waitSeconds = Math.ceil((this.lockUntil - now) / 1000);
         this.toast(`尝试次数过多，请等待 ${waitSeconds} 秒`);
       }
       return;
     }
     if (!PinSecurity.isValidFormat(value)) {
+      if (force) {
+        this.toast('请输入 4-6 位数字密码');
+      }
+      return;
+    }
+    if (!force && value.length < 6) {
       return;
     }
     this.busy = true;
@@ -133,7 +139,7 @@ struct HomePage {
         this.pinInput = '';
         await this.refreshRuntimeState(false);
         await this.refreshPermissions();
-      } else if (value.length === 6) {
+      } else {
         this.failedPinAttempts++;
         this.pinInput = '';
         if (this.failedPinAttempts >= 5) {
@@ -144,7 +150,7 @@ struct HomePage {
           this.toast('密码错误');
         }
       }
-    } catch (_) {
+    } catch (error) {
       if (seq === this.unlockSeq) {
         this.toast('PIN 校验失败，请重试');
       }
@@ -517,8 +523,16 @@ struct HomePage {
         .onChange((value: string) => {
           if (value.length <= 6) {
             this.pinInput = value;
-            this.unlockFromInput(value);
+            this.unlockFromInput(value, false);
           }
+        })
+      Button('解锁')
+        .width(220)
+        .height(48)
+        .enabled(!this.busy)
+        .margin({ top: 8 })
+        .onClick(() => {
+          this.unlockFromInput(this.pinInput, true);
         })
     }
     .padding(32)

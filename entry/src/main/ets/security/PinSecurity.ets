@@ -1,5 +1,6 @@
-import { buffer, util } from '@kit.ArkTS';
+import { util } from '@kit.ArkTS';
 import { cryptoFramework } from '@kit.CryptoArchitectureKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 
 export interface PinCredential {
   salt: string;
@@ -7,6 +8,9 @@ export interface PinCredential {
 }
 
 export class PinSecurity {
+  private static readonly DOMAIN: number = 0x0000;
+  private static readonly TAG: string = 'PinSecurity';
+
   public static isValidFormat(pin: string): boolean {
     return /^\d{4,6}$/.test(pin);
   }
@@ -24,7 +28,7 @@ export class PinSecurity {
     const salt = PinSecurity.toHex(randomData);
     return {
       salt: salt,
-      hash: await PinSecurity.hashLegacy(pin, salt)
+      hash: await PinSecurity.hashPin(pin, salt)
     };
   }
 
@@ -32,29 +36,34 @@ export class PinSecurity {
     if (!PinSecurity.isValidFormat(pin) || !PinSecurity.isCompleteCredential(salt, expectedHash)) {
       return false;
     }
-    const legacy = await PinSecurity.hashLegacy(pin, salt);
-    if (PinSecurity.equal(legacy, expectedHash)) {
+    const current = await PinSecurity.hashPin(pin, salt);
+    if (PinSecurity.equal(current, expectedHash)) {
       return true;
     }
-    const modern = await PinSecurity.hashModern(pin, salt);
-    return PinSecurity.equal(modern, expectedHash);
+    try {
+      const legacy = await PinSecurity.hashLegacyAsync(pin, salt);
+      return PinSecurity.equal(legacy, expectedHash);
+    } catch (error) {
+      hilog.warn(PinSecurity.DOMAIN, PinSecurity.TAG, 'legacy pin hash failed');
+      return false;
+    }
   }
 
-  private static async hashLegacy(pin: string, salt: string): Promise<string> {
-    const digest = cryptoFramework.createMd('SHA256');
-    const encoded = buffer.from(`${salt}:${pin}`, 'utf-8');
-    const input = new Uint8Array(encoded.buffer, encoded.byteOffset, encoded.length);
-    await digest.update({ data: input });
-    const result = await digest.digest();
-    return PinSecurity.toHex(result.data);
-  }
-
-  private static async hashModern(pin: string, salt: string): Promise<string> {
+  private static async hashPin(pin: string, salt: string): Promise<string> {
     const digest = cryptoFramework.createMd('SHA256');
     const encoder = new util.TextEncoder();
     const bytes = encoder.encodeInto(`${salt}:${pin}`);
     digest.updateSync({ data: bytes });
     const result = digest.digestSync();
+    return PinSecurity.toHex(result.data);
+  }
+
+  private static async hashLegacyAsync(pin: string, salt: string): Promise<string> {
+    const digest = cryptoFramework.createMd('SHA256');
+    const encoder = new util.TextEncoder();
+    const bytes = encoder.encodeInto(`${salt}:${pin}`);
+    await digest.update({ data: bytes });
+    const result = await digest.digest();
     return PinSecurity.toHex(result.data);
   }
 
