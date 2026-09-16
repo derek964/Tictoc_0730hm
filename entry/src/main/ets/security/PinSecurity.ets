@@ -7,8 +7,6 @@ export interface PinCredential {
 }
 
 export class PinSecurity {
-  public static readonly DEFAULT_PIN: string = '1234';
-
   public static isValidFormat(pin: string): boolean {
     return /^\d{4,6}$/.test(pin);
   }

@@ -30,7 +30,8 @@ struct HomePage {
   @State private pinInput: string = '';
   @State private failedPinAttempts: number = 0;
   @State private lockUntil: number = 0;
-  @State private showDefaultPinHint: boolean = false;
+  @State private setupPin: string = '';
+  @State private setupConfirmPin: string = '';
 
   @State private authorized: boolean = false;
   @State private appLimits: AppLimitEntry[] = [];
@@ -69,17 +70,7 @@ struct HomePage {
         this.pinSalt = '';
         this.pinHash = '';
       }
-      if (!PinSecurity.isCompleteCredential(this.pinSalt, this.pinHash)) {
-        const credential = await PinSecurity.createCredential(PinSecurity.DEFAULT_PIN);
-        await this.settings.savePin(credential.salt, credential.hash);
-        this.pinSalt = credential.salt;
-        this.pinHash = credential.hash;
-        this.showDefaultPinHint = !saved.defaultPinHintShown;
-        if (this.showDefaultPinHint) {
-          await this.settings.markDefaultPinHintShown();
-        }
-      }
-      this.hasPin = true;
+      this.hasPin = PinSecurity.isCompleteCredential(this.pinSalt, this.pinHash);
       await this.refreshRuntimeState(false);
       await this.refreshPermissions();
       if (this.immediateTokens.length > 0 && this.authorized) {
@@ -142,10 +133,6 @@ struct HomePage {
         this.pinInput = '';
         await this.refreshRuntimeState(false);
         await this.refreshPermissions();
-        if (this.showDefaultPinHint) {
-          this.toast('初始家长密码为 1234，请在个人中心修改');
-          this.showDefaultPinHint = false;
-        }
       } else if (value.length === 6) {
         this.failedPinAttempts++;
         this.pinInput = '';
@@ -408,6 +395,8 @@ struct HomePage {
         .width('100%')
         .height('100%')
         .justifyContent(FlexAlign.Center)
+      } else if (!this.hasPin) {
+        this.pinSetupView()
       } else if (!this.isUnlocked) {
         this.pinUnlockView()
       } else if (this.showAlwaysAllowed) {
@@ -423,6 +412,89 @@ struct HomePage {
     .width('100%')
     .height('100%')
     .backgroundColor(ThemeColor.pageBg)
+  }
+
+
+  @Builder
+  private pinSetupView() {
+    Column({ space: 18 }) {
+      Text('设置家长密码')
+        .fontSize(24)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(ThemeColor.title)
+      Text('首次使用请设置 4-6 位数字密码，用于保护管控设置')
+        .fontSize(15)
+        .fontColor(ThemeColor.subtitle)
+        .textAlign(TextAlign.Center)
+      TextInput({ text: this.setupPin, placeholder: '请输入新密码' })
+        .type(InputType.NUMBER_PASSWORD)
+        .maxLength(6)
+        .width(220)
+        .height(52)
+        .backgroundColor(ThemeColor.card)
+        .borderRadius(14)
+        .onChange((value: string) => {
+          if (value.length <= 6) {
+            this.setupPin = value;
+          }
+        })
+      TextInput({ text: this.setupConfirmPin, placeholder: '请再次输入确认' })
+        .type(InputType.NUMBER_PASSWORD)
+        .maxLength(6)
+        .width(220)
+        .height(52)
+        .backgroundColor(ThemeColor.card)
+        .borderRadius(14)
+        .onChange((value: string) => {
+          if (value.length <= 6) {
+            this.setupConfirmPin = value;
+          }
+        })
+      Button('完成设置')
+        .width(220)
+        .height(48)
+        .enabled(!this.busy)
+        .onClick(() => {
+          this.confirmPinSetup();
+        })
+    }
+    .padding(32)
+    .width('100%')
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
+  }
+
+  private async confirmPinSetup(): Promise<void> {
+    if (this.busy) {
+      return;
+    }
+    if (!PinSecurity.isValidFormat(this.setupPin)) {
+      this.toast('密码需为 4-6 位数字');
+      return;
+    }
+    if (this.setupPin !== this.setupConfirmPin) {
+      this.toast('两次输入的密码不一致');
+      return;
+    }
+    this.busy = true;
+    try {
+      const credential = await PinSecurity.createCredential(this.setupPin);
+      await this.settings.savePin(credential.salt, credential.hash);
+      this.pinSalt = credential.salt;
+      this.pinHash = credential.hash;
+      this.hasPin = true;
+      this.isUnlocked = true;
+      this.setupPin = '';
+      this.setupConfirmPin = '';
+      await this.refreshRuntimeState(false);
+      await this.refreshPermissions();
+      this.toast('家长密码已设置');
+    } catch (_) {
+      this.toast('密码保存失败，请重试');
+    } finally {
+      this.busy = false;
+    }
   }
 
   @Builder

@@ -124,16 +124,17 @@ export class SettingsStore {
   private async readStringArray(key: string): Promise<string[]> {
     const raw = await this.getStore().get(key, '[]') as string;
     try {
-      const parsed = JSON.parse(raw);
+      const parsed: Object = JSON.parse(raw) as Object;
       if (!Array.isArray(parsed)) {
         return [];
       }
       const values: string[] = [];
-      for (let index = 0; index < parsed.length; index++) {
-        values.push(`${parsed[index]}`);
+      const items: Object[] = parsed as Object[];
+      for (let index = 0; index < items.length; index++) {
+        values.push(`${items[index]}`);
       }
       return values;
-    } catch (_) {
+    } catch (error) {
       return [];
     }
   }
@@ -142,9 +143,9 @@ export class SettingsStore {
     const raw = await this.getStore().get(SettingsStore.KEY_APP_LIMITS, '[]') as string;
     let parsed: AppLimitEntry[] = [];
     try {
-      const decoded = JSON.parse(raw);
+      const decoded: Object = JSON.parse(raw) as Object;
       parsed = Array.isArray(decoded) ? decoded as AppLimitEntry[] : [];
-    } catch (_) {
+    } catch (error) {
       parsed = [];
     }
     const result: AppLimitEntry[] = [];
