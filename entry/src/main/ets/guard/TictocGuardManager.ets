@@ -78,8 +78,8 @@ export class TictocGuardManager {
 
   public async syncControlRules(managed: AppLimitEntry[], whitelist: string[],
     downtime: string): Promise<GuardActionResult> {
-    const tokens = this.restrictedTokens(managed, whitelist);
-    const downtimeResult = await this.syncDowntime(tokens, downtime);
+    // Downtime = allowlist: whitelist apps stay usable; empty whitelist still restricts all others.
+    const downtimeResult = await this.syncDowntime(whitelist, downtime);
     if (!downtimeResult.success) {
       return downtimeResult;
     }
@@ -90,18 +90,16 @@ export class TictocGuardManager {
     return { success: true, message: '管控设置已同步到系统' };
   }
 
-  public async syncDowntime(tokens: string[], downtime: string): Promise<GuardActionResult> {
+  public async syncDowntime(whitelistTokens: string[], downtime: string): Promise<GuardActionResult> {
     if (downtime.length === 0) {
-      return await this.removeNamedStrategy(TictocGuardManager.DOWNTIME_STRATEGY, '已关闭停用时间');
+      return await this.removeNamedStrategy(TictocGuardManager.DOWNTIME_STRATEGY, '已关闭停用时段');
     }
     const parts = downtime.split('-');
     if (parts.length !== 2 || !TimeUtils.isValidClock(parts[0]) || !TimeUtils.isValidClock(parts[1]) ||
       parts[0] === parts[1]) {
-      return { success: false, message: '请输入有效且不同的开始、结束时间，例如 22:00 和 07:00' };
+      return { success: false, message: '请设置有效且不同的开始和结束时间，例如 22:00 至 07:00' };
     }
-    if (tokens.length === 0) {
-      return { success: false, message: '请先添加管控应用后再开启停用时间' };
-    }
+    // ALLOWLIST: tokens are apps still allowed in downtime; empty list = all non-exempt apps blocked.
     const strategy: guardService.GuardStrategy = {
       name: TictocGuardManager.DOWNTIME_STRATEGY,
       timeStrategy: {
@@ -110,10 +108,10 @@ export class TictocGuardManager {
         endTime: parts[1],
         repeat: [1, 2, 3, 4, 5, 6, 7]
       },
-      appInfo: { appTokens: tokens },
-      appRestrictionType: guardService.RestrictionType.BLOCKLIST_TYPE
+      appInfo: { appTokens: whitelistTokens },
+      appRestrictionType: guardService.RestrictionType.TRUSTLIST_TYPE
     };
-    return await this.replaceAndStart(strategy, '每日停用时间已启用');
+    return await this.replaceAndStart(strategy, '每日停用时段已生效（除白名单外默认受控）');
   }
 
   public async syncAppLimits(managed: AppLimitEntry[], whitelist: string[]): Promise<GuardActionResult> {

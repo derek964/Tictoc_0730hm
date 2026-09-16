@@ -64,6 +64,11 @@ export struct ControlPage {
             this.switchRow('启用停用时间', this.downtimeEnabled(), (checked: boolean) => {
               this.onToggleDowntime(checked);
             })
+            Text('时段内除「始终允许」白名单外，其他应用默认受控；不必先添加管控应用。')
+              .fontSize(12)
+              .fontColor(ThemeColor.subtitle)
+              .width('100%')
+              .padding({ left: 16, right: 16, bottom: 10 })
             if (this.downtimeEnabled()) {
               Divider().color(ThemeColor.divider).margin({ left: 16 })
               this.valueRow('开始时间', this.downtimeStart, () => this.openStartPicker())
@@ -76,24 +81,37 @@ export struct ControlPage {
           .backgroundColor(ThemeColor.card)
           .borderRadius(16)
 
-          this.sectionLabel('应用限额 (App Limits)')
+          this.sectionLabel('应用限额')
           Column() {
-            if (this.appLimits.length === 0) {
-              Text('点下方添加：先在系统页搜索勾选，再回来设每天时长')
+            Row() {
+              Text(this.appLimits.length > 0 ? `已选 ${this.appLimits.length} 个` : '尚未选择')
                 .fontSize(14)
                 .fontColor(ThemeColor.subtitle)
+              Blank()
+              Text('名称和图标在系统选择页查看')
+                .fontSize(12)
+                .fontColor(ThemeColor.subtitle)
+            }
+            .padding({ left: 16, right: 16, top: 12, bottom: 8 })
+            .width('100%')
+
+            Divider().color(ThemeColor.divider)
+
+            if (this.appLimits.length === 0) {
+              Text('还没有单独限额的应用。停用时段不依赖这里；若要给某应用设每天时长，请用下方搜索添加。')
+                .fontSize(13)
+                .fontColor(ThemeColor.subtitle)
                 .width('100%')
-                .textAlign(TextAlign.Center)
-                .padding(32)
+                .padding({ left: 16, right: 16, top: 16, bottom: 8 })
             } else {
               ForEach(this.appLimits, (item: AppLimitEntry, index: number) => {
                 Column() {
                   Row() {
                     Column({ space: 4 }) {
-                      Text(`第 ${index + 1} 个已选应用`)
+                      Text(`管控应用 ${index + 1}`)
                         .fontSize(16)
                         .fontColor(ThemeColor.title)
-                      Text(item.minutes > 0 ? '点击可修改每天时长' : '待设置每天时长')
+                      Text(item.minutes > 0 ? '点此可修改每天时长' : '尚未设置每天时长')
                         .fontSize(12)
                         .fontColor(ThemeColor.subtitle)
                     }
@@ -120,19 +138,27 @@ export struct ControlPage {
                 }
               }, (item: AppLimitEntry) => `${item.token}#${item.minutes}`)
             }
+
             Divider().color(ThemeColor.divider)
-            Row({ space: 8 }) {
-              Text('+')
-                .fontSize(20)
-                .fontColor(ThemeColor.primary)
-              Text('添加管控应用')
-                .fontSize(16)
+            Row() {
+              Column({ space: 4 }) {
+                Text('搜索并添加应用')
+                  .fontSize(16)
+                  .fontWeight(FontWeight.Bold)
+                  .fontColor(ThemeColor.primary)
+                Text(this.authorized ? '打开系统选择页，可搜索应用名并勾选' : '需先在个人中心开启屏幕时间守护授权')
+                  .fontSize(12)
+                  .fontColor(ThemeColor.subtitle)
+              }
+              .layoutWeight(1)
+              .alignItems(HorizontalAlign.Start)
+              Text('去选择')
+                .fontSize(14)
                 .fontWeight(FontWeight.Bold)
                 .fontColor(ThemeColor.primary)
             }
-            .justifyContent(FlexAlign.Center)
+            .padding({ left: 16, right: 16, top: 14, bottom: 14 })
             .width('100%')
-            .padding(16)
             .opacity(this.busy ? 0.5 : 1)
             .onClick(() => {
               if (!this.busy) {
@@ -143,7 +169,7 @@ export struct ControlPage {
           .backgroundColor(ThemeColor.card)
           .borderRadius(16)
 
-          Text('添加流程在管控设置内完成：系统页负责搜索与勾选，回来后立即设每天时长。列表只用于改时长或删除；要核对选了谁，再点添加进系统页查看勾选。')
+          Text('添加走系统选择页（支持搜索）；选完后仍回到本页设置每天时长。列表无法显示真实名称，要核对已选请再点「搜索并添加应用」。')
             .fontSize(12)
             .fontColor(ThemeColor.subtitle)
             .margin({ bottom: 24 })
