@@ -67,6 +67,6 @@ export class PermissionManager {
   }
 
   public static corePermissionsGranted(snapshot: PermissionSnapshot): boolean {
-    return snapshot.screenTimeAuthorized && snapshot.hasManagedApps;
+    return snapshot.screenTimeAuthorized;
   }
 }

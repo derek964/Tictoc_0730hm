@@ -11,25 +11,24 @@ export struct ControlPage {
   @Prop whitelistCount: number = 0;
   @Prop authorized: boolean = false;
   @Prop busy: boolean = false;
-  @Prop @Watch('onPendingLimitToken') pendingLimitToken: string = '';
-  @Prop pendingLimitIndex: number = 0;
-  @Prop pendingLimitTotal: number = 0;
   onToggleDowntime: (enabled: boolean) => void = (_enabled: boolean) => {};
   onSetDowntimeClock: (start: string, end: string) => void = (_s: string, _e: string) => {};
-  onPickApps: () => void = () => {};
+  onPickApps: () => Promise<string[]> = async (): Promise<string[]> => [];
   onOpenAlwaysAllowed: () => void = () => {};
   onRemoveApp: (token: string) => void = (_token: string) => {};
-  onSetLimit: (token: string, minutes: number) => void = (_token: string, _minutes: number) => {};
-  onPendingLimitClosed: (token: string) => void = (_token: string) => {};
+  onSetLimit: (token: string, minutes: number) => Promise<void> = async (_token: string, _minutes: number): Promise<void> => {};
 
-  @State private showStartPicker: boolean = false;
-  @State private showEndPicker: boolean = false;
-  @State private showDurationPicker: boolean = false;
+  @State private showSheet: boolean = false;
+  @State private sheetKind: string = 'none';
   @State private durationCommitted: boolean = false;
   @State private editingToken: string = '';
   @State private editingHours: number = 1;
   @State private editingMinutes: number = 0;
   @State private pickerDate: Date = new Date();
+  @State private addSessionTokens: string[] = [];
+  @State private addSessionIndex: number = 0;
+  @State private addSessionTotal: number = 0;
+  @State private inAddSession: boolean = false;
   private hourRange: string[] = ControlPage.buildRange(0, 23);
   private minuteRange: string[] = ControlPage.buildRange(0, 59);
 
@@ -41,14 +40,12 @@ export struct ControlPage {
     return values;
   }
 
-  onPendingLimitToken(): void {
-    if (this.pendingLimitToken.length > 0) {
-      this.openPendingDuration(this.pendingLimitToken);
-    }
-  }
-
   private downtimeEnabled(): boolean {
     return this.downtime.length > 0;
+  }
+
+  private isAddSession(): boolean {
+    return this.inAddSession && this.addSessionTokens.length > 0;
   }
 
   build() {
@@ -64,7 +61,7 @@ export struct ControlPage {
         Column({ space: 16 }) {
           this.sectionLabel('停用时间 (Downtime)')
           Column() {
-            this.switchRow('开启停用时间', this.downtimeEnabled(), (checked: boolean) => {
+            this.switchRow('启用停用时间', this.downtimeEnabled(), (checked: boolean) => {
               this.onToggleDowntime(checked);
             })
             if (this.downtimeEnabled()) {
@@ -82,7 +79,7 @@ export struct ControlPage {
           this.sectionLabel('应用限额 (App Limits)')
           Column() {
             if (this.appLimits.length === 0) {
-              Text('先在系统页搜索并勾选应用，回来后再设每天时长')
+              Text('点下方添加：先在系统页搜索勾选，再回来设每天时长')
                 .fontSize(14)
                 .fontColor(ThemeColor.subtitle)
                 .width('100%')
@@ -102,13 +99,13 @@ export struct ControlPage {
                     }
                     .layoutWeight(1)
                     .alignItems(HorizontalAlign.Start)
-                    .onClick(() => this.openDuration(item))
+                    .onClick(() => this.openDuration(item, false))
 
                     Text(item.minutes > 0 ? `${item.minutes}分钟` : '未设时长')
                       .fontSize(14)
                       .fontWeight(FontWeight.Bold)
                       .fontColor(ThemeColor.primary)
-                      .onClick(() => this.openDuration(item))
+                      .onClick(() => this.openDuration(item, false))
                     Text('删除')
                       .fontSize(13)
                       .fontColor(ThemeColor.danger)
@@ -121,14 +118,14 @@ export struct ControlPage {
                     Divider().color(ThemeColor.divider).margin({ left: 16 })
                   }
                 }
-              }, (item: AppLimitEntry) => item.token)
+              }, (item: AppLimitEntry) => `${item.token}#${item.minutes}`)
             }
             Divider().color(ThemeColor.divider)
             Row({ space: 8 }) {
               Text('+')
                 .fontSize(20)
                 .fontColor(ThemeColor.primary)
-              Text('搜索并选择应用')
+              Text('添加管控应用')
                 .fontSize(16)
                 .fontWeight(FontWeight.Bold)
                 .fontColor(ThemeColor.primary)
@@ -136,16 +133,17 @@ export struct ControlPage {
             .justifyContent(FlexAlign.Center)
             .width('100%')
             .padding(16)
+            .opacity(this.busy ? 0.5 : 1)
             .onClick(() => {
               if (!this.busy) {
-                this.onPickApps();
+                this.startAddSession();
               }
             })
           }
           .backgroundColor(ThemeColor.card)
           .borderRadius(16)
 
-          Text('搜索和勾选只能在系统选择页完成，那里有应用名称、图标和搜索。回来后会立刻让你为新选的应用设置每天时长。本页列表只用来改时长或删除，无法显示具体应用名。再点「搜索并选择应用」可在系统页看到已勾选项。')
+          Text('添加流程在管控设置内完成：系统页负责搜索与勾选，回来后立即设每天时长。列表只用于改时长或删除；要核对选了谁，再点添加进系统页查看勾选。')
             .fontSize(12)
             .fontColor(ThemeColor.subtitle)
             .margin({ bottom: 24 })
@@ -160,17 +158,12 @@ export struct ControlPage {
     .width('100%')
     .height('100%')
     .backgroundColor(ThemeColor.pageBg)
-    .bindSheet($$this.showStartPicker, this.startClockSheet(), { height: 360, dragBar: true, showClose: true })
-    .bindSheet($$this.showEndPicker, this.endClockSheet(), { height: 360, dragBar: true, showClose: true })
-    .bindSheet($$this.showDurationPicker, this.durationSheet(), {
-      height: 380,
+    .bindSheet($$this.showSheet, this.sheetContent(), {
+      height: this.sheetKind === 'duration' ? 400 : 360,
       dragBar: true,
       showClose: true,
       onDisappear: () => {
-        if (!this.durationCommitted && this.pendingLimitToken.length > 0 &&
-          this.editingToken === this.pendingLimitToken) {
-          this.onPendingLimitClosed(this.editingToken);
-        }
+        this.handleSheetDisappear();
       }
     })
   }
@@ -213,17 +206,24 @@ export struct ControlPage {
     }
     .padding({ left: 16, right: 16, top: 14, bottom: 14 })
     .width('100%')
-    .onClick(onClick)
+    .onClick(() => onClick())
   }
 
   @Builder
-  private startClockSheet() {
-    this.clockSheetContent('选择开始时间', true)
-  }
-
-  @Builder
-  private endClockSheet() {
-    this.clockSheetContent('选择结束时间', false)
+  private sheetContent() {
+    if (this.sheetKind === 'start') {
+      this.clockSheetContent('选择开始时间', true)
+    } else if (this.sheetKind === 'end') {
+      this.clockSheetContent('选择结束时间', false)
+    } else if (this.sheetKind === 'duration') {
+      this.durationSheet()
+    } else {
+      Column() {
+        Text('')
+      }
+      .width('100%')
+      .height(1)
+    }
   }
 
   @Builder
@@ -235,7 +235,7 @@ export struct ControlPage {
       TimePicker({ selected: this.pickerDate })
         .useMilitaryTime(true)
         .onChange((value: TimePickerResult) => {
-          const next = new Date(this.pickerDate);
+          const next = new Date(this.pickerDate.getTime());
           next.setHours(Number(value.hour), Number(value.minute), 0, 0);
           this.pickerDate = next;
         })
@@ -245,11 +245,10 @@ export struct ControlPage {
           const clock = TimeUtils.formatClock(this.pickerDate.getHours(), this.pickerDate.getMinutes());
           if (isStart) {
             this.onSetDowntimeClock(clock, this.downtimeEnd);
-            this.showStartPicker = false;
           } else {
             this.onSetDowntimeClock(this.downtimeStart, clock);
-            this.showEndPicker = false;
           }
+          this.closeSheet();
         })
     }
     .padding(24)
@@ -259,17 +258,22 @@ export struct ControlPage {
   @Builder
   private durationSheet() {
     Column({ space: 16 }) {
-      Text(this.pendingLimitToken.length > 0 ?
-        (this.pendingLimitTotal > 1 ?
-          `为刚选的应用设置每天时长（${this.pendingLimitIndex}/${this.pendingLimitTotal}）` :
-          '为刚选的应用设置每天时长') :
+      Text(this.isAddSession() ?
+        (this.addSessionTotal > 1 ?
+          `添加流程：设置每天时长（${this.addSessionIndex}/${this.addSessionTotal}）` :
+          '添加流程：设置每天时长') :
         '设置每天可用时长')
         .fontSize(18)
         .fontWeight(FontWeight.Bold)
+      if (this.isAddSession()) {
+        Text('这是管控设置里「选应用再到设时长」的第二步')
+          .fontSize(12)
+          .fontColor(ThemeColor.subtitle)
+      }
       Row({ space: 24 }) {
         Column() {
           TextPicker({ range: this.hourRange, selected: this.editingHours })
-            .onChange((value: string | string[], index: number | number[]) => {
+            .onChange((_value: string | string[], index: number | number[]) => {
               this.editingHours = index as number;
             })
             .height(150)
@@ -292,49 +296,127 @@ export struct ControlPage {
         .width('100%')
         .enabled(this.editingHours > 0 || this.editingMinutes > 0)
         .onClick(() => {
-          const minutes = this.editingHours * 60 + this.editingMinutes;
-          if (minutes > 0 && this.editingToken.length > 0) {
-            this.durationCommitted = true;
-            this.onSetLimit(this.editingToken, minutes);
-            const closedToken = this.editingToken;
-            this.showDurationPicker = false;
-            this.onPendingLimitClosed(closedToken);
-          }
+          this.confirmDuration();
         })
     }
     .padding(24)
     .width('100%')
   }
 
+  private async startAddSession(): Promise<void> {
+    try {
+      const added = await this.onPickApps();
+      if (added.length === 0) {
+        this.clearAddSession();
+        return;
+      }
+      this.addSessionTokens = added;
+      this.addSessionTotal = added.length;
+      this.addSessionIndex = 1;
+      this.inAddSession = true;
+      this.openDurationForToken(added[0], true);
+    } catch (_) {
+      this.clearAddSession();
+    }
+  }
+
+  private advanceAddSession(): void {
+    if (!this.inAddSession) {
+      return;
+    }
+    const remain: string[] = [];
+    for (let index = 0; index < this.addSessionTokens.length; index++) {
+      if (this.addSessionTokens[index] !== this.editingToken) {
+        remain.push(this.addSessionTokens[index]);
+      }
+    }
+    this.addSessionTokens = remain;
+    if (remain.length === 0) {
+      this.clearAddSession();
+      return;
+    }
+    this.addSessionIndex = this.addSessionIndex + 1;
+    this.openDurationForToken(remain[0], true);
+  }
+
+  private clearAddSession(): void {
+    this.addSessionTokens = [];
+    this.addSessionTotal = 0;
+    this.addSessionIndex = 0;
+    this.inAddSession = false;
+  }
+
+  private async confirmDuration(): Promise<void> {
+    const minutes = this.editingHours * 60 + this.editingMinutes;
+    if (minutes <= 0 || this.editingToken.length === 0) {
+      return;
+    }
+    const token = this.editingToken;
+    const continueAdd = this.isAddSession();
+    this.durationCommitted = true;
+    await this.onSetLimit(token, minutes);
+    this.closeSheet();
+    if (continueAdd) {
+      this.advanceAddSession();
+    }
+  }
+
   private openStartPicker(): void {
     const parsed = TimeUtils.parseClock(this.downtimeStart);
     const date = new Date();
-    date.setHours(parsed[0], parsed[1], 0, 0);
+    const hour = parsed.length >= 2 ? parsed[0] : 22;
+    const minute = parsed.length >= 2 ? parsed[1] : 0;
+    date.setHours(hour, minute, 0, 0);
     this.pickerDate = date;
-    this.showStartPicker = true;
+    this.openSheet('start');
   }
 
   private openEndPicker(): void {
     const parsed = TimeUtils.parseClock(this.downtimeEnd);
     const date = new Date();
-    date.setHours(parsed[0], parsed[1], 0, 0);
+    const hour = parsed.length >= 2 ? parsed[0] : 7;
+    const minute = parsed.length >= 2 ? parsed[1] : 0;
+    date.setHours(hour, minute, 0, 0);
     this.pickerDate = date;
-    this.showEndPicker = true;
+    this.openSheet('end');
   }
 
-  private openDuration(item: AppLimitEntry): void {
-    this.durationCommitted = false;
-    this.editingToken = item.token;
-    this.editingHours = item.minutes > 0 ? Math.floor(item.minutes / 60) : 1;
-    this.editingMinutes = item.minutes > 0 ? item.minutes % 60 : 0;
-    this.showDurationPicker = true;
+  private openDuration(item: AppLimitEntry, asAddStep: boolean): void {
+    this.openDurationForToken(item.token, asAddStep);
+    if (!asAddStep) {
+      this.editingHours = item.minutes > 0 ? Math.floor(item.minutes / 60) : 1;
+      this.editingMinutes = item.minutes > 0 ? item.minutes % 60 : 0;
+    }
   }
 
-  private openPendingDuration(token: string): void {
+  private openDurationForToken(token: string, asAddStep: boolean): void {
     this.durationCommitted = false;
     this.editingToken = token;
-    this.editingHours = 1;
-    this.editingMinutes = 0;
-    this.showDurationPicker = true;
+    if (asAddStep) {
+      this.editingHours = 1;
+      this.editingMinutes = 0;
+    }
+    this.openSheet('duration');
+  }
+
+  private openSheet(kind: string): void {
+    this.sheetKind = kind;
+    this.showSheet = true;
+  }
+
+  private closeSheet(): void {
+    this.showSheet = false;
+    this.sheetKind = 'none';
+  }
+
+  private handleSheetDisappear(): void {
+    const kind = this.sheetKind;
+    const wasAdd = this.isAddSession() && kind === 'duration';
+    const token = this.editingToken;
+    const committed = this.durationCommitted;
+    this.sheetKind = 'none';
+    if (wasAdd && !committed && token.length > 0) {
+      this.advanceAddSession();
+    }
   }
 }

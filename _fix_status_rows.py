@@ -1,27 +1,20 @@
-import { PinSecurity } from '../security/PinSecurity';
+﻿from pathlib import Path
+
+profile_path = Path(r"D:\TictocBuild-20260911\entry\src\main\ets\pages\ProfilePage.ets")
+# Read current and surgically replace permissionItem usage + builders
+# Easier to rewrite full file with PermissionRow component
+
+src = r'''import { PinSecurity } from '../security/PinSecurity';
+import { PermissionManager, PermissionSnapshot } from '../permission/PermissionManager';
 import { ThemeColor } from '../ui/Theme';
 
-/**
- * Permission row mirrors Android PermissionItem:
- * trailing and subtitle both come from the same granted flag.
- * granted is copied into @State so the Text nodes always rebuild when it flips.
- */
 @Component
 struct PermissionStatusRow {
   @Prop title: string = '';
-  @Prop @Watch('onGrantedChanged') granted: boolean = false;
+  @Prop granted: boolean = false;
   @Prop offSubtitle: string = '';
   @Prop isLast: boolean = true;
   onTap: () => void = () => {};
-  @State private isOn: boolean = false;
-
-  aboutToAppear(): void {
-    this.isOn = this.granted;
-  }
-
-  onGrantedChanged(): void {
-    this.isOn = this.granted;
-  }
 
   build() {
     Column() {
@@ -30,17 +23,17 @@ struct PermissionStatusRow {
           Text(this.title)
             .fontSize(16)
             .fontColor(ThemeColor.title)
-          Text(this.isOn ? '已开启' : this.offSubtitle)
+          Text(this.granted ? '已开启' : this.offSubtitle)
             .fontSize(12)
             .fontColor(ThemeColor.subtitle)
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
 
-        Text(this.isOn ? '已开启' : '去开启')
+        Text(this.granted ? '已开启' : '去开启')
           .fontSize(14)
-          .fontColor(this.isOn ? ThemeColor.subtitle : ThemeColor.danger)
-          .fontWeight(this.isOn ? FontWeight.Normal : FontWeight.Bold)
+          .fontColor(this.granted ? ThemeColor.subtitle : ThemeColor.danger)
+          .fontWeight(this.granted ? FontWeight.Normal : FontWeight.Bold)
       }
       .padding({ left: 16, right: 16, top: 16, bottom: 16 })
       .width('100%')
@@ -58,17 +51,16 @@ struct PermissionStatusRow {
 
 @Component
 export struct ProfilePage {
-  // Same source of truth as Android local mutableState, linked to Home so resume/refresh updates both card and rows.
-  @Link authorized: boolean;
-  @Link notifyEnabled: boolean;
-  @Link backgroundGranted: boolean;
+  @Prop @Watch('onAuthorizedChange') authorized: boolean = false;
+  @Prop @Watch('onNotifyChange') notifyEnabled: boolean = false;
+  @Prop @Watch('onBackgroundChange') backgroundGranted: boolean = false;
   @Prop pinSalt: string = '';
   @Prop pinHash: string = '';
-  onRequestAuth: () => Promise<void> = async () => {};
-  onRequestNotify: () => Promise<void> = async () => {};
-  onOpenBackground: () => Promise<void> = async () => {};
+  onRequestAuth: () => void = () => {};
+  onRequestNotify: () => void = () => {};
+  onOpenBackground: () => void = () => {};
   onReleaseAll: () => void = () => {};
-  onRefreshPermissions: () => Promise<void> = async () => {};
+  onRefreshPermissions: () => void = () => {};
   onPinChanged: (salt: string, hash: string) => void = (_salt: string, _hash: string) => {};
   onToast: (message: string) => void = (_message: string) => {};
 
@@ -78,58 +70,44 @@ export struct ProfilePage {
   @State private newPin: string = '';
   @State private confirmPin: string = '';
   @State private releasePin: string = '';
-  @State private busyAction: boolean = false;
+  @State private authGranted: boolean = false;
+  @State private notifyGranted: boolean = false;
+  @State private backgroundOk: boolean = false;
 
   aboutToAppear(): void {
-    // Android ON_RESUME equivalent when the profile tab content is created / shown again.
-    this.reloadPermissions();
+    this.syncLocalFlags();
+    this.onRefreshPermissions();
+  }
+
+  onAuthorizedChange(): void {
+    this.authGranted = this.authorized;
+  }
+
+  onNotifyChange(): void {
+    this.notifyGranted = this.notifyEnabled;
+  }
+
+  onBackgroundChange(): void {
+    this.backgroundOk = this.backgroundGranted;
+  }
+
+  private syncLocalFlags(): void {
+    this.authGranted = this.authorized;
+    this.notifyGranted = this.notifyEnabled;
+    this.backgroundOk = this.backgroundGranted;
+  }
+
+  private snapshot(): PermissionSnapshot {
+    return {
+      screenTimeAuthorized: this.authGranted,
+      hasManagedApps: false,
+      notificationEnabled: this.notifyGranted,
+      backgroundGranted: this.backgroundOk
+    };
   }
 
   private coreGranted(): boolean {
-    return this.authorized;
-  }
-
-  private async reloadPermissions(): Promise<void> {
-    await this.onRefreshPermissions();
-  }
-
-  private async handleAuthTap(): Promise<void> {
-    if (this.busyAction) {
-      return;
-    }
-    this.busyAction = true;
-    try {
-      await this.onRequestAuth();
-      await this.reloadPermissions();
-    } finally {
-      this.busyAction = false;
-    }
-  }
-
-  private async handleBackgroundTap(): Promise<void> {
-    if (this.busyAction) {
-      return;
-    }
-    this.busyAction = true;
-    try {
-      await this.onOpenBackground();
-      await this.reloadPermissions();
-    } finally {
-      this.busyAction = false;
-    }
-  }
-
-  private async handleNotifyTap(): Promise<void> {
-    if (this.busyAction) {
-      return;
-    }
-    this.busyAction = true;
-    try {
-      await this.onRequestNotify();
-      await this.reloadPermissions();
-    } finally {
-      this.busyAction = false;
-    }
+    return PermissionManager.corePermissionsGranted(this.snapshot());
   }
 
   build() {
@@ -162,12 +140,10 @@ export struct ProfilePage {
           Column() {
             PermissionStatusRow({
               title: '屏幕时间守护授权',
-              granted: this.authorized,
+              granted: this.authGranted,
               offSubtitle: '授权后系统才能执行管控规则。应用选择与时长在「管控设置」中完成。',
               isLast: true,
-              onTap: () => {
-                this.handleAuthTap();
-              }
+              onTap: () => this.onRequestAuth()
             })
           }
           .backgroundColor(ThemeColor.card)
@@ -178,21 +154,17 @@ export struct ProfilePage {
           Column() {
             PermissionStatusRow({
               title: '保持后台运行',
-              granted: this.backgroundGranted,
+              granted: this.backgroundOk,
               offSubtitle: '对应安卓忽略电池优化，减少被系统挂起',
               isLast: false,
-              onTap: () => {
-                this.handleBackgroundTap();
-              }
+              onTap: () => this.onOpenBackground()
             })
             PermissionStatusRow({
               title: '允许发送通知',
-              granted: this.notifyEnabled,
+              granted: this.notifyGranted,
               offSubtitle: '及时接收重要提醒',
               isLast: true,
-              onTap: () => {
-                this.handleNotifyTap();
-              }
+              onTap: () => this.onRequestNotify()
             })
           }
           .backgroundColor(ThemeColor.card)
@@ -210,7 +182,7 @@ export struct ProfilePage {
           .borderRadius(16)
           .margin({ left: 16, right: 16 })
 
-          Text('权限行与顶部守护状态使用同一组实时状态：授权、后台、通知。从系统页返回或点完开关后会重新读取并刷新「去开启 / 已开启」。')
+          Text('顶部守护状态只看屏幕时间守护授权。右侧「去开启 / 已开启」会随真实权限状态刷新。解除全部限制会清空本应用下发的规则，不会自动关闭系统侧的守护授权开关。')
             .fontSize(12)
             .fontColor(ThemeColor.subtitle)
             .margin({ left: 20, right: 20, top: 8, bottom: 28 })
@@ -440,6 +412,18 @@ export struct ProfilePage {
     this.closeSheet();
     this.releasePin = '';
     this.onReleaseAll();
-    await this.reloadPermissions();
   }
 }
+'''
+
+# Ensure Chinese is real: write as UTF-8 from unicode-aware string
+# The r''' above has Chinese as real chars if the file encoding is utf-8 when PowerShell writes it.
+# PowerShell Set-Content -Encoding utf8 should preserve Chinese in the heredoc.
+
+profile_path.write_text(src, encoding='utf-8', newline='\n')
+text = profile_path.read_text(encoding='utf-8')
+print('PermissionStatusRow', 'struct PermissionStatusRow' in text)
+print('authGranted', 'authGranted' in text)
+print('去开启', '去开启' in text)
+print('literal \\u', '\\u5df2' in text)
+print('Watch authorized', "@Watch('onAuthorizedChange')" in text)

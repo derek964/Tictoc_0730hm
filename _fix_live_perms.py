@@ -1,4 +1,57 @@
-import { PinSecurity } from '../security/PinSecurity';
+﻿from pathlib import Path
+import re
+
+home_path = Path(r"D:\TictocBuild-20260911\entry\src\main\ets\pages\HomePage.ets")
+profile_path = Path(r"D:\TictocBuild-20260911\entry\src\main\ets\pages\ProfilePage.ets")
+ht = home_path.read_text(encoding="utf-8")
+
+# 1) Change Profile wiring to @Link for the three flags
+old = re.search(r"        ProfilePage\(\{[\s\S]*?\n        \}\)", ht)
+if not old:
+    raise SystemExit("ProfilePage wire not found")
+print("OLD WIRE:\n", old.group(0)[:400])
+
+new_wire = """        ProfilePage({
+          authorized: $authorized,
+          notifyEnabled: $notifyEnabled,
+          backgroundGranted: $backgroundGranted,
+          pinSalt: this.pinSalt,
+          pinHash: this.pinHash,
+          onRequestAuth: () => this.requestAuthorization(),
+          onRequestNotify: () => this.requestNotify(),
+          onOpenBackground: () => this.openBackground(),
+          onReleaseAll: () => this.releaseAll(),
+          onRefreshPermissions: () => this.refreshProfilePermissions(),
+          onPinChanged: (salt: string, hash: string) => this.saveNewPin(salt, hash),
+          onToast: (message: string) => this.toast(message)
+        })"""
+ht = ht[:old.start()] + new_wire + ht[old.end():]
+
+# 2) Make requestAuthorization/requestNotify/openBackground return after refresh (already do)
+# Add refreshProfilePermissions that refreshes runtime+permissions - Profile will await it
+if "refreshProfilePermissions" not in ht:
+    needle = "  private async refreshPermissions(): Promise<void> {"
+    insert = """  private async refreshProfilePermissions(): Promise<void> {
+    await this.refreshRuntimeState(false);
+    await this.refreshPermissions();
+  }
+
+  private async refreshPermissions(): Promise<void> {"""
+    if needle not in ht:
+        raise SystemExit("refreshPermissions missing")
+    ht = ht.replace(needle, insert, 1)
+    print("added refreshProfilePermissions")
+
+# Ensure request* methods are Promise and complete refresh before return - already are.
+# Change signatures of callbacks used by Profile to return Promise - Home methods already async.
+
+home_path.write_text(ht, encoding="utf-8", newline="\n")
+print("Home wired with $authorized/$notify/$background")
+
+# 3) Rewrite ProfilePage following Android: display from @Link; child row uses @Watch/@State;
+# after each action await refresh; aboutToAppear refresh like ON_RESUME
+profile = '''import { PinSecurity } from '../security/PinSecurity';
+import { PermissionManager, PermissionSnapshot } from '../permission/PermissionManager';
 import { ThemeColor } from '../ui/Theme';
 
 /**
@@ -443,3 +496,25 @@ export struct ProfilePage {
     await this.reloadPermissions();
   }
 }
+'''
+profile_path.write_text(profile, encoding='utf-8', newline='\n')
+print('Profile written', profile_path.stat().st_size)
+print('has @Link authorized', '@Link authorized' in profile)
+print('has onGrantedChanged', 'onGrantedChanged' in profile)
+print('has $authorized in home', 'authorized: $authorized' in home_path.read_text(encoding='utf-8'))
+
+# Ensure unused import PermissionSnapshot still ok - used? snapshot removed - remove unused import
+pt = profile_path.read_text(encoding='utf-8')
+if 'PermissionSnapshot' in pt and 'PermissionSnapshot {' not in pt.replace('import { PermissionManager, PermissionSnapshot }', ''):
+    # PermissionSnapshot only in import - remove from import
+    if 'PermissionSnapshot' not in pt.split('import')[1].split('\n')[0] if False else True:
+        pass
+# Check if PermissionSnapshot used in body
+body = pt.split('from \'../permission/PermissionManager\';',1)[1]
+if 'PermissionSnapshot' not in body:
+    pt = pt.replace('import { PermissionManager, PermissionSnapshot }', 'import { PermissionManager }')
+    # PermissionManager might also be unused now - coreGranted doesn't use it
+    if 'PermissionManager' not in pt.split('import { PermissionManager }')[1]:
+        pt = pt.replace("import { PermissionManager } from '../permission/PermissionManager';\n", '')
+    profile_path.write_text(pt, encoding='utf-8', newline='\n')
+    print('cleaned unused imports')
