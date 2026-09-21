@@ -5,6 +5,9 @@ export interface AppLimitEntry {
   token: string;
   minutes: number;
   label: string;
+  startedAt: number;
+  accruedUsed: number;
+  usedDay: string;
 }
 
 export interface TictocSettingsSnapshot {
@@ -157,14 +160,21 @@ export class SettingsStore {
         seen.push(item.token);
         const minutes = item.minutes > 0 ? item.minutes : 0;
         const label = item.label !== undefined ? item.label : '';
-        result.push({ token: item.token, minutes: minutes, label: label });
+        result.push({
+          token: item.token,
+          minutes: minutes,
+          label: label,
+          startedAt: item.startedAt !== undefined ? item.startedAt : 0,
+          accruedUsed: item.accruedUsed !== undefined ? item.accruedUsed : 0,
+          usedDay: item.usedDay !== undefined ? item.usedDay : ''
+        });
       }
     }
     for (let index = 0; index < appTokens.length; index++) {
       const token = appTokens[index];
       if (seen.indexOf(token) < 0) {
         seen.push(token);
-        result.push({ token: token, minutes: 0, label: '' });
+        result.push({ token: token, minutes: 0, label: '', startedAt: 0, accruedUsed: 0, usedDay: '' });
       }
     }
     return result;

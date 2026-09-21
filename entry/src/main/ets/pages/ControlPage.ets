@@ -61,20 +61,36 @@ export struct ControlPage {
         .width('100%')
         .padding({ left: 16, right: 16, top: 12, bottom: 8 })
 
-      Button('进入管控')
-        .width('100%')
-        .height(48)
-        .fontSize(17)
-        .fontWeight(FontWeight.Bold)
-        .fontColor('#FFFFFF')
-        .backgroundColor(ThemeColor.primary)
-        .margin({ left: 16, right: 16, bottom: 4 })
-        .onClick(() => this.onEnterControl())
-      Text('规则已由系统执行。点击后锁定 Tictoc，修改需验证家长密码（对齐安卓打开应用先输 PIN）。')
-        .fontSize(12)
-        .fontColor(ThemeColor.subtitle)
-        .width('100%')
-        .padding({ left: 16, right: 16, bottom: 8 })
+      Row() {
+        Column({ space: 4 }) {
+          Text('设置可编辑')
+            .fontSize(15)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(ThemeColor.title)
+          Text('锁定后需家长密码才能再改设置')
+            .fontSize(12)
+            .fontColor(ThemeColor.subtitle)
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+
+        Button('进入管控')
+          .height(36)
+          .fontSize(14)
+          .fontWeight(FontWeight.Medium)
+          .fontColor('#FFFFFF')
+          .backgroundColor(ThemeColor.primary)
+          .padding({ left: 14, right: 14 })
+          .enabled(!this.busy)
+          .onClick(() => {
+            this.onEnterControl();
+          })
+      }
+      .width('100%')
+      .padding({ left: 14, right: 14, top: 12, bottom: 12 })
+      .margin({ left: 16, right: 16, bottom: 8 })
+      .backgroundColor(ThemeColor.chipBg)
+      .borderRadius(12)
 
       Scroll() {
         Column({ space: 16 }) {

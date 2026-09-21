@@ -133,7 +133,7 @@ export class TictocGuardManager {
         appInfo: { appTokens: [item.token] },
         appRestrictionType: guardService.RestrictionType.TRUSTLIST_TYPE
       };
-      const result = await this.replaceAndStart(strategy, '应用限额已更新');
+      const result = await this.applyDurationStrategy(strategy, '已按每天额度更新应用限额');
       if (!result.success) {
         return result;
       }
@@ -265,6 +265,103 @@ export class TictocGuardManager {
     }
     const unsigned = hash >>> 0;
     return `${TictocGuardManager.LIMIT_PREFIX}${unsigned.toString(16)}${token.length.toString(16)}`;
+  }
+
+  private async applyDurationStrategy(strategy: guardService.GuardStrategy,
+    successMessage: string): Promise<GuardActionResult> {
+    // Android compares today's UsageStats against the daily cap (absolute update).
+    // HM INCLUSIVE_DURATION counts from strategy start; stop+start or re-start on every
+    // edit resets that counter and looks like "additive from the moment parent taps save".
+    // So: add+start once; later edits only updateGuardStrategy; never stop/restart.
+    try {
+      const strategies = await guardService.queryGuardStrategies();
+      const existing = strategies.find((item: guardService.GuardStrategy) => item.name === strategy.name);
+      if (existing !== undefined) {
+        // Update only — calling start again often restarts the duration window.
+        await guardService.updateGuardStrategy(strategy.name, strategy);
+        await this.enforceLimitAgainstUsed(strategy);
+      } else {
+        await guardService.addGuardStrategy(strategy);
+        await guardService.startGuardStrategy(strategy.name);
+        await this.enforceLimitAgainstUsed(strategy);
+      }
+      return { success: true, message: successMessage };
+    } catch (error) {
+      return this.toFailure('配置应用限额失败', error as BusinessError);
+    }
+  }
+
+  /**
+   * When API 26+ queryGuardStrategyData is available, compare strategy usage to the
+   * parent-set daily cap and immediately block if already exhausted (Android-like).
+   * On API 22 devices this call fails closed and is ignored.
+   */
+  private async enforceLimitAgainstUsed(strategy: guardService.GuardStrategy): Promise<void> {
+    const tokens = strategy.appInfo.appTokens;
+    if (tokens.length === 0) {
+      return;
+    }
+    const limitMinutes = strategy.timeStrategy.totalDuration;
+    if (limitMinutes === undefined || limitMinutes < 1) {
+      return;
+    }
+    try {
+      const data = await guardService.queryGuardStrategyData(strategy.name);
+      const usedSeconds = data.usageDuration;
+      if (usedSeconds >= limitMinutes * 60) {
+        await guardService.setAppsRestriction(
+          { appTokens: tokens },
+          guardService.RestrictionType.BLOCKLIST_TYPE
+        );
+      } else {
+        try {
+          await guardService.releaseAppsRestriction(
+            { appTokens: tokens },
+            guardService.RestrictionType.BLOCKLIST_TYPE
+          );
+        } catch (_releaseError) {
+        }
+      }
+    } catch (_queryError) {
+      // API 26+ only; API 22 devices skip.
+    }
+  }
+
+    public async blockAppDailyCap(token: string): Promise<GuardActionResult> {
+    try {
+      await this.removeNamedStrategy(this.limitStrategyName(token), '');
+      await guardService.setAppsRestriction(
+        { appTokens: [token] },
+        guardService.RestrictionType.BLOCKLIST_TYPE
+      );
+      return { success: true, message: '今日已用量已达新限额，已立即限制该应用' };
+    } catch (error) {
+      return this.toFailure('立即限制失败', error as BusinessError);
+    }
+  }
+
+  public async syncSingleAppLimit(token: string, minutes: number,
+    whitelist: string[]): Promise<GuardActionResult> {
+    if (whitelist.indexOf(token) >= 0) {
+      return await this.removeNamedStrategy(this.limitStrategyName(token), '白名单应用不设限额');
+    }
+    if (minutes < 1) {
+      return await this.removeNamedStrategy(this.limitStrategyName(token), '已清除该应用限额');
+    }
+    if (minutes > 1440) {
+      return { success: false, message: '每天时长需在 1-1440 分钟之间' };
+    }
+    const strategy: guardService.GuardStrategy = {
+      name: this.limitStrategyName(token),
+      timeStrategy: {
+        type: guardService.TimeStrategyType.INCLUSIVE_DURATION_TYPE,
+        totalDuration: minutes,
+        repeat: [1, 2, 3, 4, 5, 6, 7]
+      },
+      appInfo: { appTokens: [token] },
+      appRestrictionType: guardService.RestrictionType.TRUSTLIST_TYPE
+    };
+    return await this.applyDurationStrategy(strategy, '已按每天额度更新该应用限额');
   }
 
   private async replaceAndStart(strategy: guardService.GuardStrategy,

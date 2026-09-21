@@ -252,14 +252,27 @@ struct HomePage {
       const token = tokens[index];
       let minutes = 0;
       let label = '';
+      let startedAt = 0;
+      let accruedUsed = 0;
+      let usedDay = '';
       for (let look = 0; look < current.length; look++) {
         if (current[look].token === token) {
           minutes = current[look].minutes;
           label = current[look].label;
+          startedAt = current[look].startedAt;
+          accruedUsed = current[look].accruedUsed;
+          usedDay = current[look].usedDay;
           break;
         }
       }
-      next.push({ token: token, minutes: minutes, label: label });
+      next.push({
+        token: token,
+        minutes: minutes,
+        label: label,
+        startedAt: startedAt,
+        accruedUsed: accruedUsed,
+        usedDay: usedDay
+      });
     }
     return next;
   }
@@ -302,26 +315,85 @@ struct HomePage {
   }
 
   private async setAppLimit(token: string, minutes: number): Promise<void> {
+    // Android: daily cap is absolute (UsageStats today vs limit). Parent edits UPDATE that
+    // cap; they must not mint a fresh timer from "now". Keep local accrued for the calendar
+    // day; sync the absolute minutes to Screen Time Guard; block immediately if already over.
+    const today = TimeUtils.dayKey(Date.now());
+    const now = Date.now();
     const next: AppLimitEntry[] = [];
+    let accruedForToken = 0;
     for (let index = 0; index < this.appLimits.length; index++) {
       const item = this.appLimits[index];
       if (item.token === token) {
-        next.push({ token: token, minutes: minutes, label: item.label });
+        let accrued = 0;
+        let startedAt = 0;
+        if (item.usedDay === today) {
+          accrued = item.accruedUsed;
+          startedAt = item.startedAt;
+        }
+        if (startedAt > 0) {
+          const extra = Math.floor((now - startedAt) / 60000);
+          if (extra > 0) {
+            accrued = accrued + extra;
+          }
+        }
+        accruedForToken = accrued;
+        const over = minutes > 0 && accrued >= minutes;
+        next.push({
+          token: token,
+          minutes: minutes,
+          label: item.label,
+          // Keep the same day window; do not restart local timer on every edit.
+          startedAt: over ? 0 : (startedAt > 0 ? startedAt : now),
+          accruedUsed: accrued,
+          usedDay: today
+        });
       } else {
         next.push(item);
       }
     }
     this.appLimits = next;
     await this.settings.saveAppLimits(next);
-    await this.syncRules('已更新应用限额');
+    if (!this.authorized) {
+      this.toast('请先开启系统守护授权');
+      return;
+    }
+    let result: GuardActionResult;
+    if (minutes > 0 && accruedForToken >= minutes) {
+      result = await this.guard.blockAppDailyCap(token);
+      if (result.success) {
+        this.toast(`今日已用约 ${accruedForToken} 分钟，已达每日 ${minutes} 分钟上限，已立即限制`);
+      } else {
+        this.toast(result.message);
+      }
+      await this.refreshRuntimeState(false);
+      return;
+    }
+    // Always push the absolute daily cap — never (minutes - accrued) — so Guard update
+    // replaces the budget instead of stacking a leftover slice from this edit.
+    result = await this.guard.syncSingleAppLimit(token, minutes, this.whitelistTokens);
+    if (result.success) {
+      this.toast(`已更新为每天 ${minutes} 分钟（覆盖原限额，不是叠加）`);
+    } else {
+      this.toast(result.message);
+    }
+    await this.refreshRuntimeState(false);
   }
+
 
   private async setAppLabel(token: string, label: string): Promise<void> {
     const next: AppLimitEntry[] = [];
     for (let index = 0; index < this.appLimits.length; index++) {
       const item = this.appLimits[index];
       if (item.token === token) {
-        next.push({ token: token, minutes: item.minutes, label: label });
+        next.push({
+          token: token,
+          minutes: item.minutes,
+          label: label,
+          startedAt: item.startedAt,
+          accruedUsed: item.accruedUsed,
+          usedDay: item.usedDay
+        });
       } else {
         next.push(item);
       }

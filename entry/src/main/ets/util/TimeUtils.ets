@@ -1,4 +1,9 @@
 export class TimeUtils {
+  public static dayKey(epochMs: number): string {
+    const date = new Date(epochMs);
+    return `${date.getFullYear()}-${TimeUtils.pad2(date.getMonth() + 1)}-${TimeUtils.pad2(date.getDate())}`;
+  }
+
   public static pad2(value: number): string {
     return value < 10 ? `0${value}` : `${value}`;
   }
