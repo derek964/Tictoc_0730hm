@@ -2,6 +2,7 @@ import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { appPicker, guardService } from '@kit.ScreenTimeGuardKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { deviceInfo } from '@kit.BasicServicesKit';
 import { AppLimitEntry } from '../data/SettingsStore';
 import { TimeUtils } from '../util/TimeUtils';
 
@@ -9,6 +10,15 @@ export interface GuardActionResult {
   success: boolean;
   message: string;
 }
+
+export interface LimitUsageRow {
+  token: string;
+  label: string;
+  limitMinutes: number;
+  usedMinutes: number;
+  available: boolean;
+}
+
 
 export interface GuardRuntimeState {
   errorMessage: string;
@@ -408,6 +418,54 @@ export class TictocGuardManager {
       default:
         return { success: false, message: `${prefix}（错误码 ${error.code}）` };
     }
+  }
+
+
+  /** API 26+ can read per-strategy usage; keep compatibleSdk at 6.1.0 and gate at runtime. */
+  public supportsStrategyUsageQuery(): boolean {
+    return deviceInfo.sdkApiVersion >= 26;
+  }
+
+  public async queryLimitUsages(entries: AppLimitEntry[]): Promise<LimitUsageRow[]> {
+    const rows: LimitUsageRow[] = [];
+    const supported = this.supportsStrategyUsageQuery();
+    for (let index = 0; index < entries.length; index++) {
+      const item = entries[index];
+      if (item.minutes < 1) {
+        continue;
+      }
+      const label = item.label.length > 0 ? item.label : `管控应用 ${index + 1}`;
+      if (!supported) {
+        rows.push({
+          token: item.token,
+          label: label,
+          limitMinutes: item.minutes,
+          usedMinutes: 0,
+          available: false
+        });
+        continue;
+      }
+      try {
+        const data = await guardService.queryGuardStrategyData(this.limitStrategyName(item.token));
+        const usedMinutes = Math.floor(data.usageDuration / 60);
+        rows.push({
+          token: item.token,
+          label: label,
+          limitMinutes: item.minutes,
+          usedMinutes: usedMinutes,
+          available: true
+        });
+      } catch (_error) {
+        rows.push({
+          token: item.token,
+          label: label,
+          limitMinutes: item.minutes,
+          usedMinutes: 0,
+          available: false
+        });
+      }
+    }
+    return rows;
   }
 
   private logError(operation: string, error: BusinessError): void {

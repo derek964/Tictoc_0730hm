@@ -1,7 +1,7 @@
 import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { AppLimitEntry, SettingsStore } from '../data/SettingsStore';
-import { GuardActionResult, TictocGuardManager } from '../guard/TictocGuardManager';
+import { GuardActionResult, LimitUsageRow, TictocGuardManager } from '../guard/TictocGuardManager';
 import { AlwaysAllowedPage } from './AlwaysAllowedPage';
 import { ControlPage } from './ControlPage';
 import { DashboardPage } from './DashboardPage';
@@ -41,6 +41,8 @@ struct HomePage {
   @State private downtimeStart: string = '22:00';
   @State private downtimeEnd: string = '07:00';
   @State private configuredStrategies: number = 0;
+  @State private usageSupported: boolean = false;
+  @State private usageRows: LimitUsageRow[] = [];
   @State private notifyEnabled: boolean = false;
   @State private backgroundGranted: boolean = false;
   @State private busy: boolean = false;
@@ -56,6 +58,7 @@ struct HomePage {
     if (!this.loading && this.hasPin && this.isUnlocked) {
       this.refreshRuntimeState(false);
       this.refreshPermissions();
+      this.refreshDashboardUsage();
     }
   }
 
@@ -361,23 +364,21 @@ struct HomePage {
     let result: GuardActionResult;
     if (minutes > 0 && accruedForToken >= minutes) {
       result = await this.guard.blockAppDailyCap(token);
-      if (result.success) {
-        this.toast(`今日已用约 ${accruedForToken} 分钟，已达每日 ${minutes} 分钟上限，已立即限制`);
-      } else {
+      if (!result.success) {
         this.toast(result.message);
       }
       await this.refreshRuntimeState(false);
+    await this.refreshDashboardUsage();
       return;
     }
     // Always push the absolute daily cap — never (minutes - accrued) — so Guard update
     // replaces the budget instead of stacking a leftover slice from this edit.
     result = await this.guard.syncSingleAppLimit(token, minutes, this.whitelistTokens);
-    if (result.success) {
-      this.toast(`已更新为每天 ${minutes} 分钟（覆盖原限额，不是叠加）`);
-    } else {
+    if (!result.success) {
       this.toast(result.message);
     }
     await this.refreshRuntimeState(false);
+    await this.refreshDashboardUsage();
   }
 
 
@@ -491,6 +492,20 @@ struct HomePage {
       }
     }
     return min === max ? `${min} 分钟` : `${min}-${max} 分钟`;
+  }
+
+
+  private async refreshDashboardUsage(): Promise<void> {
+    this.usageSupported = this.guard.supportsStrategyUsageQuery();
+    if (!this.authorized) {
+      this.usageRows = [];
+      return;
+    }
+    try {
+      this.usageRows = await this.guard.queryLimitUsages(this.appLimits);
+    } catch (_error) {
+      this.usageRows = [];
+    }
   }
 
   private guardStatus(): string {
@@ -673,7 +688,9 @@ struct HomePage {
           managedCount: this.appLimits.length,
           downtimeText: this.downtime,
           limitSummary: this.limitSummary(),
-          strategyCount: this.configuredStrategies
+          strategyCount: this.configuredStrategies,
+          usageSupported: this.usageSupported,
+          usageRows: this.usageRows
         })
       }
       .tabBar(this.tabBarItem('仪表盘', 0))
@@ -723,6 +740,7 @@ struct HomePage {
       this.currentTab = index;
       this.refreshRuntimeState(false);
       this.refreshPermissions();
+      this.refreshDashboardUsage();
     })
     .width('100%')
     .height('100%')
